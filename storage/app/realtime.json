@@ -1,0 +1,45 @@
+{
+    "messages": [],
+    "presence": {
+        "maria.santos@cblrep.ph": {
+            "id": "maria.santos@cblrep.ph",
+            "email": "maria.santos@cblrep.ph",
+            "name": "Maria Santos",
+            "lat": 10.07780481583318,
+            "lng": 124.36611685541614,
+            "updatedAt": 1787814943360
+        },
+        "angelou@gmail.com": {
+            "id": "angelou@gmail.com",
+            "email": "angelou@gmail.com",
+            "name": "Angelou Ranolo",
+            "lat": 10.077810499999998,
+            "lng": 124.36613675,
+            "updatedAt": 1787806169907
+        },
+        "john@gmail.com": {
+            "id": "john@gmail.com",
+            "email": "john@gmail.com",
+            "name": "John Christopher Talili",
+            "lat": 10.0777885,
+            "lng": 124.3662125,
+            "updatedAt": 1787819127472
+        },
+        "junjun@gmail.com": {
+            "id": "junjun@gmail.com",
+            "email": "junjun@gmail.com",
+            "name": "Junjun",
+            "lat": 10.0777885,
+            "lng": 124.3662125,
+            "updatedAt": 1787819426642
+        },
+        "jesus@gmail.com": {
+            "id": "jesus@gmail.com",
+            "email": "jesus@gmail.com",
+            "name": "Jesus Christ",
+            "lat": 10.0777885,
+            "lng": 124.3662125,
+            "updatedAt": 1787820932338
+        }
+    }
+}
