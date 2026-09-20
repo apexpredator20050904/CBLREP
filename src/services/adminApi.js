@@ -36,7 +36,7 @@ export const api = axios.create({
 // Attach the Sanctum bearer token to every request.
 api.interceptors.request.use((config) => {
   const token = getToken();
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  if (token) config.headers.Authorization = "Bearer " + token;
   return config;
 });
 
@@ -109,6 +109,48 @@ export async function fetchDashboardStats() {
   }
 }
 
+export async function fetchAdminSettings() {
+  try {
+    const { data } = await api.get("/admin/settings");
+    return data;
+  } catch (err) {
+    throw new Error(errMsg(err, "Failed to load system settings."), { cause: err });
+  }
+}
+
+export async function saveAdminSettings(payload) {
+  try {
+    const { data } = await api.post("/admin/settings", payload);
+    return data;
+  } catch (err) {
+    throw new Error(errMsg(err, "Failed to save system settings."), { cause: err });
+  }
+}
+
+export async function clearAdminCache() {
+  try {
+    const { data } = await api.post("/admin/settings/cache/clear");
+    return data;
+  } catch (err) {
+    throw new Error(errMsg(err, "Failed to clear application cache."), { cause: err });
+  }
+}
+
+export async function downloadAdminBackup() {
+  try {
+    const response = await api.get("/admin/settings/backup", { responseType: "blob" });
+    const disposition = response.headers["content-disposition"] || "";
+    const filename = disposition.match(/filename="?([^"]+)"?/)?.[1] || "cblrep-trinidad-backup.sql";
+    const url = URL.createObjectURL(response.data);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    throw new Error(errMsg(err, "Failed to download database backup."), { cause: err });
+  }
+}
 
 // ── Trinidad resident & barangay verification ────────────────────
 
@@ -209,7 +251,98 @@ export function openAnalyticsPDF(params = {}) {
   window.open(exportAnalyticsUrl(params, "pdf"), "_blank");
 }
 
-// ── Backwards compatibility ──────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// CBLRE Admin · Content management API (part of adminApi service)
+// Endpoints: GET/POST /admin/content, PATCH/DELETE /admin/content/{id}.
+// ─────────────────────────────────────────────────────────────
+
+/** GET /admin/content — summary { total, published, drafts } + rows. */
+export async function fetchContentPages() {
+  try {
+    const { data } = await api.get("/admin/content");
+    return data;
+  } catch (err) {
+    throw new Error(errMsg(err, "Failed to load content pages."), { cause: err });
+  }
+}
+
+/** POST /admin/content — create a draft or publish directly. */
+export async function createContentPage(payload) {
+  try {
+    const { data } = await api.post("/admin/content", payload);
+    return data;
+  } catch (err) {
+    throw new Error(errMsg(err, "Failed to save page."), { cause: err });
+  }
+}
+
+/** PATCH /admin/content/{id} — edit title/slug/body or publish/unpublish. */
+export async function updateContentPage(id, payload) {
+  try {
+    const { data } = await api.patch(`/admin/content/${id}`, payload);
+    return data;
+  } catch (err) {
+    throw new Error(errMsg(err, "Failed to update page."), { cause: err });
+  }
+}
+
+/** DELETE /admin/content/{id} — remove an outdated page. */
+export async function deleteContentPage(id) {
+  try {
+    const { data } = await api.delete(`/admin/content/${id}`);
+    return data;
+  } catch (err) {
+    throw new Error(errMsg(err, "Failed to delete page."), { cause: err });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// CBLRE Admin · Notifications & announcements API
+// Endpoints: GET/POST /admin/notifications,
+//            POST /admin/notifications/{id}/send,
+//            DELETE /admin/notifications/{id}.
+// ─────────────────────────────────────────────────────────────
+
+/** GET /admin/notifications — summary { total, sent, scheduled, drafts }. */
+export async function fetchAnnouncements() {
+  try {
+    const { data } = await api.get("/admin/notifications");
+    return data;
+  } catch (err) {
+    throw new Error(errMsg(err, "Failed to load announcements."), { cause: err });
+  }
+}
+
+/** POST /admin/notifications — compose a draft / schedule / send-now. */
+export async function createAnnouncement(payload) {
+  try {
+    const { data } = await api.post("/admin/notifications", payload);
+    return data;
+  } catch (err) {
+    throw new Error(errMsg(err, "Failed to save announcement."), { cause: err });
+  }
+}
+
+/** POST /admin/notifications/{id}/send — mark a draft/scheduled item sent. */
+export async function sendAnnouncement(id) {
+  try {
+    const { data } = await api.post(`/admin/notifications/${id}/send`);
+    return data;
+  } catch (err) {
+    throw new Error(errMsg(err, "Failed to broadcast announcement."), { cause: err });
+  }
+}
+
+/** DELETE /admin/notifications/{id} — remove a draft/scheduled item. */
+export async function deleteAnnouncement(id) {
+  try {
+    const { data } = await api.delete(`/admin/notifications/${id}`);
+    return data;
+  } catch (err) {
+    throw new Error(errMsg(err, "Failed to delete announcement."), { cause: err });
+  }
+}
+
 // Legacy pages under src/admin/ import { apiFetch, getToken,
 // exportAnalyticsUrl, downloadCSV, openPDF } from "./api". Keep those names
 // working by delegating to the axios client above.
