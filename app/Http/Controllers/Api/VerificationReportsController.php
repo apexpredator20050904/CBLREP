@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AuditLog;
 use App\Models\Resource;
-use App\Models\SystemLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -120,12 +120,13 @@ class VerificationReportsController extends Controller
             };
         }
 
-        SystemLog::create([
-            'admin_id' => $request->user()->id,
-            'action' => 'Report for '.$row['subject_label'].' marked '.$decision,
-            'target_type' => 'resource',
-            'target_id' => (int) $id,
-        ]);
+        AuditLog::record(
+            $request,
+            'Report for '.$row['subject_label'].' marked '.$decision,
+            'resource',
+            (int) $id,
+            $notes,
+        );
 
         return response()->json([
             'message' => 'Report marked '.$decision.'.',

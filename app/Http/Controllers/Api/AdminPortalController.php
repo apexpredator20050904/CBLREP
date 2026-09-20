@@ -4,9 +4,9 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\AdminSetting;
+use App\Models\AuditLog;
 use App\Models\Exchange;
 use App\Models\Resource;
-use App\Models\SystemLog;
 use App\Models\TimebankTransaction;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -20,6 +20,15 @@ class AdminPortalController extends Controller
     private function guard(Request $request): void
     {
         abort_unless($request->user()?->role === 'admin', 403, 'Unauthorized. Admin access required.');
+    }
+
+    /**
+     * Centralised audit-log writer — delegates to AuditLog::record()
+     * so every admin action is captured with IP + user-agent.
+     */
+    private function logAdminAction(Request $request, string $action, ?string $targetType = null, ?int $targetId = null, ?string $details = null): AuditLog
+    {
+        return AuditLog::record($request, $action, $targetType, $targetId, $details);
     }
 
     // ------------------------------------------------------------------
@@ -51,6 +60,11 @@ class AdminPortalController extends Controller
             $query->where('account_status', 'suspended');
         }
 
+        // Barangay-level filter for the Trinidad community directory.
+        if ($barangay = trim((string) $request->query('barangay'))) {
+            $query->where('barangay_or_location', 'like', "%{$barangay}%");
+        }
+
         $users = $query->get()->map(fn (User $u) => [
             'id' => $u->id,
             'name' => $u->name,
@@ -61,6 +75,8 @@ class AdminPortalController extends Controller
             'verification_status' => $u->verificationStatusLabel(),
             'account_status' => $u->accountStatusLabel(),
             'is_verified' => (bool) $u->is_verified,
+            'is_student' => (bool) $u->student_status,
+            'student_school' => $u->student_school,
             'time_bank_credits' => (float) $u->time_bank_credits,
             'barangay_or_location' => $u->barangay_or_location,
             'resources_count' => $u->resources_count,
@@ -90,8 +106,18 @@ class AdminPortalController extends Controller
             case 'verify':
                 $user->forceFill(['is_verified' => true]);
                 $user->verification_status = 'verified';
+                // Allow the admin to capture student status during verification.
+                if ($request->has('student_status') || $request->has('student_school')) {
+                    $user->student_status = (bool) $request->input('student_status', $user->student_status ?? false);
+                    $user->student_school = $request->input('student_school', $user->student_school);
+                }
                 $user->save();
                 $logAction = 'Verified member '.$user->name;
+                $details = $reason !== '' ? $reason : null;
+                if ((bool) $user->student_status) {
+                    $logAction = 'Verified student member '.$user->name
+                        .' ('.($user->student_school ?? 'school not specified').')';
+                }
                 break;
 
             case 'reject':
@@ -100,14 +126,16 @@ class AdminPortalController extends Controller
                 }
                 $user->verification_status = 'rejected';
                 $user->save();
-                $logAction = 'Rejected verification of '.$user->name.' — '.$reason;
+                $logAction = 'Rejected verification of '.$user->name;
+                $details = $reason;
                 break;
 
             case 'request-info':
                 if ($reason === '') {
                     abort(422, 'Describe the information needed.');
                 }
-                $logAction = 'Verification info requested from '.$user->name.' — '.$reason;
+                $logAction = 'Verification info requested from '.$user->name;
+                $details = $reason;
                 break;
 
             case 'suspend':
@@ -116,25 +144,22 @@ class AdminPortalController extends Controller
                     $user->admin_note = $reason;
                 }
                 $user->save();
-                $logAction = 'Suspended member '.$user->name.($reason !== '' ? ' — '.$reason : '');
+                $logAction = 'Suspended member '.$user->name;
+                $details = $reason !== '' ? $reason : null;
                 break;
 
             case 'reactivate':
                 $user->account_status = 'active';
                 $user->save();
                 $logAction = 'Reactivated member '.$user->name;
+                $details = null;
                 break;
 
             default:
                 abort(422, 'Unsupported action.');
         }
 
-        SystemLog::create([
-            'admin_id' => $request->user()->id,
-            'action' => $logAction ?? ucfirst($action).' recorded for '.$user->name,
-            'target_type' => 'user',
-            'target_id' => $user->id,
-        ]);
+        $this->logAdminAction($request, $logAction ?? ucfirst($action).' recorded for '.$user->name, 'user', $user->id, $details);
 
         return response()->json([
             'message' => 'User '.$action.' successful.',
@@ -146,22 +171,30 @@ class AdminPortalController extends Controller
     {
         $this->guard($request);
 
-        $pending = User::where('is_verified', false)
+        $query = User::where('is_verified', false)
             ->whereIn('verification_status', ['pending'])
-            ->where('role', '!=', 'admin')
-            ->latest()
+            ->where('role', '!=', 'admin');
+
+        // Barangay-level filter: restrict to a single Trinidad barangay.
+        if ($barangay = trim((string) $request->query('barangay'))) {
+            $query->where('barangay_or_location', 'like', "%{$barangay}%");
+        }
+
+        $pending = $query->latest()
             ->get()
             ->map(fn (User $u) => [
                 'id' => $u->id,
                 'fullName' => $u->name,
                 'email' => $u->email,
                 'barangay' => $u->barangay_or_location,
+                'is_student' => (bool) $u->student_status,
+                'student_school' => $u->student_school,
                 'role' => 'General Member',
                 'requested_at' => $u->created_at?->diffForHumans(),
             ])
             ->values();
 
-        $decided = SystemLog::with('admin')
+        $decided = AuditLog::with('admin')
             ->where('target_type', 'user')
             ->where(function ($q) {
                 $q->where('action', 'like', 'Verified%')
@@ -171,7 +204,7 @@ class AdminPortalController extends Controller
             ->latest()
             ->take(25)
             ->get()
-            ->map(fn (SystemLog $log) => [
+            ->map(fn (AuditLog $log) => [
                 'id' => $log->id,
                 'action' => $this->decisionLabel($log->action),
                 'description' => $log->action,
@@ -179,7 +212,17 @@ class AdminPortalController extends Controller
                 'time' => $log->created_at?->format('H:i'),
             ]);
 
-        return response()->json(['pending' => $pending, 'decided' => $decided]);
+        $barangays = (clone $query)
+            ->select('barangay_or_location')
+            ->distinct()
+            ->whereNotNull('barangay_or_location')
+            ->pluck('barangay_or_location');
+
+        return response()->json([
+            'pending' => $pending,
+            'decided' => $decided,
+            'barangays' => $barangays,
+        ]);
     }
 
     private function decisionLabel(string $action): string
@@ -205,6 +248,8 @@ class AdminPortalController extends Controller
                 'fullName' => $user->name,
                 'email' => $user->email,
                 'barangay' => $user->barangay_or_location,
+                'is_student' => (bool) $user->student_status,
+                'student_school' => $user->student_school,
                 'role' => $user->isAdmin() ? 'System Administrator' : 'General Member',
             ],
             'listings' => Resource::where('user_id', $user->id)->latest()->take(20)
@@ -215,10 +260,10 @@ class AdminPortalController extends Controller
                 ->get(['id', 'service_title', 'status', 'credits_transferred'])->toArray(),
             // Report authorship is anonymous in this system by design.
             'reportsFiledBy' => [],
-            'auditsMentioning' => SystemLog::where('target_type', 'user')
+            'auditsMentioning' => AuditLog::where('target_type', 'user')
                 ->where('target_id', $user->id)->latest()->take(10)
                 ->get(['id', 'action'])
-                ->map(fn (SystemLog $log) => [
+                ->map(fn (AuditLog $log) => [
                     'id' => $log->id,
                     'action' => $this->decisionLabel($log->action),
                     'description' => $log->action,
@@ -278,25 +323,54 @@ class AdminPortalController extends Controller
         return response()->json(['resources' => $rows, 'total' => $rows->count()]);
     }
 
-    public function moderateResource(Request $request, $id)
+        public function moderateResource(Request $request, $id)
     {
         $this->guard($request);
 
+        $isEdit = $request->input('action') === 'edit';
+
         $validated = $request->validate([
-            'action' => 'required|in:approve,flag,hide,remove,restore',
+            'action' => 'required|in:approve,flag,hide,remove,restore,edit',
             'reason' => 'nullable|string|max:1000',
+            'title'        => $isEdit ? ['required', 'string', 'max:255'] : ['nullable'],
+            'description'  => ['nullable', 'string'],
+            'location'     => ['nullable', 'string', 'max:255'],
+            'category_id'  => ['nullable', 'integer', 'exists:categories,id'],
         ]);
 
         $action = $validated['action'];
         $reason = trim((string) ($validated['reason'] ?? ''));
+
+        $resource = Resource::findOrFail($id);
+
+        // ---- Edit: update listing fields without changing status ----
+        if ($action === 'edit') {
+            $resource->update([
+                'title'       => $validated['title'],
+                'description' => $validated['description'] ?? $resource->description,
+                'location'    => $validated['location'] ?? $resource->location,
+                'category_id' => $validated['category_id'] ?? $resource->category_id,
+            ]);
+
+            $this->logAdminAction(
+                $request,
+                'Edited listing "'.$resource->title.'"',
+                'resource',
+                $resource->id,
+                $reason !== '' ? $reason : null,
+            );
+
+            return response()->json([
+                'message' => 'Listing "'.$resource->title.'" updated successfully.',
+                'resource' => $this->resourceRow($resource),
+            ]);
+        }
 
         if (in_array($action, ['remove', 'hide'], true) && $reason === '') {
             return response()->json([
                 'message' => 'A reason is required for moderation actions.',
             ], 422);
         }
-
-        $resource = Resource::findOrFail($id);
 
         [$newStatus, $isActive] = match ($action) {
             'approve', 'restore' => ['active', true],
@@ -307,13 +381,13 @@ class AdminPortalController extends Controller
 
         $resource->update(['status' => $newStatus, 'is_active' => $isActive]);
 
-        SystemLog::create([
-            'admin_id' => $request->user()->id,
-            'action' => ucfirst($action).'d listing "'.$resource->title.'"'
+        $this->logAdminAction(
+            $request,
+            ucfirst($action).'d listing "'.$resource->title.'"'
                 .($reason !== '' ? ' — '.$reason : ''),
-            'target_type' => 'resource',
-            'target_id' => $resource->id,
-        ]);
+            'resource',
+            $resource->id,
+        );
 
         return response()->json([
             'message' => 'Listing '.$action.'d successfully.',
@@ -424,7 +498,7 @@ class AdminPortalController extends Controller
             ->groupBy('exchange_type')
             ->pluck('count', 'exchange_type');
 
-        $byBarangay = Resource::with('category')
+                $byBarangay = Resource::with('category')
             ->when($from && strtotime((string) $from), fn ($q) => $q->where('created_at', '>=', $from.' 00:00:00'))
             ->when($to && strtotime((string) $to), fn ($q) => $q->where('created_at', '<=', $to.' 23:59:59'))
             ->get()
@@ -433,16 +507,34 @@ class AdminPortalController extends Controller
             ->sortByDesc('count')
             ->values();
 
+        // Verified Trinidad residents grouped by barangay.
+        $verifiedByBarangay = User::query()
+            ->when($from && strtotime((string) $from), fn ($q) => $q->where('created_at', '>=', $from.' 00:00:00'))
+            ->when($to && strtotime((string) $to), fn ($q) => $q->where('created_at', '<=', $to.' 23:59:59'))
+            ->where('is_verified', true)
+            ->where('verification_status', 'verified')
+            ->whereNotNull('barangay_or_location')
+            ->get()
+            ->groupBy(fn ($u) => $u->barangay_or_location ?: '')
+            ->map(fn ($group, $barangay) => [
+                'barangay' => $barangay !== '' ? $barangay : 'Unspecified',
+                'verified'  => $group->count(),
+                'students'  => $group->where('student_status', true)->count(),
+            ])
+            ->sortByDesc('verified')
+            ->values();
+
         return response()->json([
             'range' => [
                 'from' => $from,
                 'to' => $to,
             ],
-            'users' => [
+                        'users' => [
                 'total' => $total,
                 'verified' => (clone $users)->where('is_verified', true)->count(),
                 'pending' => (clone $users)->where('verification_status', 'pending')->where('is_verified', false)->count(),
                 'suspended' => (clone $users)->where('account_status', 'suspended')->count(),
+                'verifiedByBarangay' => $verifiedByBarangay,
             ],
             'resources' => [
                 'total' => (clone $resources)->count(),
@@ -464,57 +556,146 @@ class AdminPortalController extends Controller
         ]);
     }
 
-    /**
-     * CSV download — the <a href> can't send headers, so auth is via ?token=.
+        /**
+     * Export analytics to CSV or PDF (controlled by ?fmt=csv|pdf).
+     *
+     * Auth is handled by the auth:sanctum + admin middleware on the route,
+     * but we also accept a ?token= fallback for <a href> downloads that
+     * cannot send an Authorization header.
      */
     public function exportAnalytics(Request $request)
     {
-        $token = \Laravel\Sanctum\PersonalAccessToken::findToken(
-            (string) $request->query('token'),
-        );
-        $admin = $token?->tokenable;
+        $fmt = $request->query('fmt', 'csv');
 
-        abort_if(
-            ! $admin || ! ($admin instanceof User) || $admin->role !== 'admin',
-            401,
-            'A valid admin token is required for this export.',
-        );
+        // Auth: prefer Sanctum bearer (middleware guarantees admin), fall
+        // back to ?token= for <a href> downloads that cannot send headers.
+        if (! $request->user()) {
+            $token = \Laravel\Sanctum\PersonalAccessToken::findToken(
+                (string) $request->query('token'),
+            );
+            $admin = $token?->tokenable;
+            abort_if(
+                ! $admin || ! ($admin instanceof User) || $admin->role !== 'admin',
+                401,
+                'A valid admin token is required for this export.',
+            );
+        } else {
+            $this->guard($request);
+            $admin = $request->user();
+        }
 
         $analyticsRequest = new Request([
             'from' => $request->query('from'),
-            'to' => $request->query('to'),
+            'to'   => $request->query('to'),
         ]);
         $analyticsRequest->setUserResolver(fn () => $admin);
 
         $data = json_decode(json_encode($this->analytics($analyticsRequest)->getData(true)), true);
 
-        $lines = [['Section', 'Metric', 'Count']];
+        // ---- CSV export ----
+        if ($fmt === 'csv') {
+            $lines = [['Section', 'Metric', 'Count']];
+            foreach (['users', 'resources'] as $section) {
+                foreach ($data[$section] as $metric => $count) {
+                    if (! is_array($count)) {
+                        $lines[] = [ucfirst($section), ucfirst((string) $metric), $count];
+                    }
+                }
+            }
+            foreach ($data['exchanges'] as $metric => $value) {
+                if ($metric === 'byBarangay') {
+                    foreach ($value as $row) {
+                        $lines[] = ['Resources by Barangay', $row['location'] !== '' ? $row['location'] : 'Unspecified', $row['count']];
+                    }
+                    continue;
+                }
+                $lines[] = ['Exchanges', ucfirst(preg_replace('/([a-z])([A-Z])/', '$1 $2', (string) $metric)), $value];
+            }
+            foreach ($data['users']['verifiedByBarangay'] ?? [] as $row) {
+                $lines[] = ['Verified Residents by Barangay', $row['barangay'], $row['verified']];
+            }
+
+            $csv = implode("\n", array_map(
+                fn ($row) => implode(',', array_map(fn ($cell) => '"'.str_replace('"', '""', (string) $cell).'"', $row)),
+                $lines,
+            ));
+
+            return response($csv, 200, [
+                'Content-Type' => 'text/csv; charset=UTF-8',
+                'Content-Disposition' => 'attachment; filename="cblrep-analytics.csv"',
+            ]);
+        }
+
+        // ---- PDF export (print-friendly HTML) ----
+        return response($this->renderAnalyticsHtml($data), 200, [
+            'Content-Type' => 'text/html; charset=UTF-8',
+            'Content-Disposition' => 'inline; filename="cblrep-analytics.pdf"',
+        ]);
+    }
+
+    /**
+     * Render a print-friendly HTML page for the analytics dashboard.
+     * The browser's print-to-PDF dialog produces the final PDF.
+     */
+    private function renderAnalyticsHtml(array $data): string
+    {
+        $rows = [];
         foreach (['users', 'resources'] as $section) {
-            foreach ($data[$section] as $metric => $count) {
+            foreach ($data[$section] ?? [] as $metric => $count) {
                 if (! is_array($count)) {
-                    $lines[] = [ucfirst($section), ucfirst((string) $metric), $count];
+                    $rows[] = '<tr><td>'.ucfirst($section).'</td><td>'.ucfirst((string) $metric).'</td><td>'.$count.'</td></tr>';
                 }
             }
         }
-        foreach ($data['exchanges'] as $metric => $value) {
+        foreach ($data['exchanges'] ?? [] as $metric => $value) {
             if ($metric === 'byBarangay') {
                 foreach ($value as $row) {
-                    $lines[] = ['Resources by Barangay', $row['location'] !== '' ? $row['location'] : 'Unspecified', $row['count']];
+                    $rows[] = '<tr><td>Resources by Barangay</td><td>'.($row['location'] !== '' ? $row['location'] : 'Unspecified').'</td><td>'.$row['count'].'</td></tr>';
                 }
                 continue;
             }
-            $lines[] = ['Exchanges', ucfirst(preg_replace('/([a-z])([A-Z])/', '$1 $2', (string) $metric)), $value];
+            $label = ucfirst(preg_replace('/([a-z])([A-Z])/', '$1 $2', (string) $metric));
+            $rows[] = '<tr><td>Exchanges</td><td>'.$label.'</td><td>'.$value.'</td></tr>';
+        }
+        foreach ($data['users']['verifiedByBarangay'] ?? [] as $row) {
+            $rows[] = '<tr><td>Verified Residents</td><td>'.$row['barangay'].'</td><td>'.$row['verified'].'</td></tr>';
         }
 
-        $csv = implode("\n", array_map(
-            fn ($row) => implode(',', array_map(fn ($cell) => '"'.str_replace('"', '""', (string) $cell).'"', $row)),
-            $lines,
-        ));
+        $byBarangayRows = '';
+        foreach (($data['exchanges']['byBarangay'] ?? []) as $b) {
+            $byBarangayRows .= '<tr><td>'.($b['location'] !== '' ? $b['location'] : 'Unspecified').'</td><td>'.$b['count'].'</td></tr>';
+        }
 
-        return response($csv, 200, [
-            'Content-Type' => 'text/csv; charset=UTF-8',
-            'Content-Disposition' => 'attachment; filename="cblrep-analytics.csv"',
-        ]);
+        $verifiedRows = '';
+        foreach (($data['users']['verifiedByBarangay'] ?? []) as $row) {
+            $verifiedRows .= '<tr><td>'.$row['barangay'].'</td><td>'.$row['verified'].'</td><td>'.($row['students'] ?? 0).'</td></tr>';
+        }
+
+        return '<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<title>CBLREP Analytics Report</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 24px; color: #1b382b; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  h2 { font-size: 16px; margin-top: 24px; border-bottom: 2px solid #2d6a4f; padding-bottom: 4px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+  th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; font-size: 12px; }
+  th { background: #e8f0e8; font-weight: bold; }
+  tr:nth-child(even) { background: #f7f7f4; }
+  .footer { margin-top: 32px; font-size: 10px; color: #888; }
+</style>
+</head><body>
+<h1>Community-Based Local Resources Exchange Portal (CBLREP)</h1>
+<p>Trinidad, Bohol &middot; Analytics Report</p>
+<p>Period: '.($data['range']['from'] ?? 'all time').' to '.($data['range']['to'] ?? 'now').'</p>
+<h2>Summary Statistics</h2>
+<table><thead><tr><th>Section</th><th>Metric</th><th>Count</th></tr></thead><tbody>'.implode('', $rows).'</tbody></table>
+<h2>Resources by Barangay</h2>
+<table><thead><tr><th>Barangay</th><th>Total Count</th></tr></thead><tbody>'.$byBarangayRows.'</tbody></table>
+<h2>Verified Residents by Barangay</h2>
+<table><thead><tr><th>Barangay</th><th>Verified Residents</th><th>Students</th></tr></thead><tbody>'.$verifiedRows.'</tbody></table>
+<div class="footer">Generated by CBLREP Admin Portal &middot; '.now()->format('M j, Y g:i A').'</div>
+</body></html>';
     }
 
     // ------------------------------------------------------------------
@@ -576,7 +757,7 @@ class AdminPortalController extends Controller
     {
         $this->guard($request);
 
-        $logs = SystemLog::with('admin')->latest()
+                $logs = AuditLog::with('admin')->latest()
             // AuditLogsPage sends ?action=resource|user|exchange|report|settings
             ->when($request->query('action'), function ($q, $type) {
                 if (in_array($type, ['user', 'resource', 'exchange', 'report', 'settings'], true)) {
@@ -584,7 +765,7 @@ class AdminPortalController extends Controller
                 }
             })
             ->take(200)->get()
-            ->map(fn (SystemLog $log) => [
+            ->map(fn (AuditLog $log) => [
                 'id' => $log->id,
                 // Badge column shows the leading verb; description keeps the detail.
                 'action' => explode(' ', (string) $log->action)[0],
@@ -636,12 +817,12 @@ class AdminPortalController extends Controller
             $changed[] = $key.':'.($value ? 'on' : 'off');
         }
 
-        if ($changed !== []) {
-            SystemLog::create([
-                'admin_id' => $request->user()->id,
-                'action' => 'Updated settings — '.implode(', ', $changed),
-                'target_type' => 'settings',
-            ]);
+                if ($changed !== []) {
+            $this->logAdminAction(
+                $request,
+                'Updated settings — '.implode(', ', $changed),
+                'settings',
+            );
         }
 
         return $this->settings($request);
