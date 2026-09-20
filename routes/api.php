@@ -45,12 +45,15 @@ Route::middleware('auth:sanctum')->group(function () {
     // Session
     Route::get('/user', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
+    Route::post('/verification', [AuthController::class, 'submitVerification']);
 
     // Member dashboard
     Route::get('/dashboard/stats', [DashboardController::class, 'stats']);
 
     // Listings & exchanges
     Route::post('/listings', [ListingController::class, 'store']);
+    Route::patch('/listings/{id}', [ListingController::class, 'update']);
+    Route::delete('/listings/{id}', [ListingController::class, 'destroy']);
     Route::get('/exchanges', [ExchangeController::class, 'index']);
     Route::patch('/exchanges/{id}', [ExchangeController::class, 'update']);
 

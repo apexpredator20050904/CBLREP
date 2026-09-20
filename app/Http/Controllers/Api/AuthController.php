@@ -108,6 +108,30 @@ class AuthController extends Controller
         return response()->json(['message' => 'Signed out successfully.']);
     }
 
+    public function submitVerification(Request $request)
+    {
+        $validated = $request->validate([
+            'barangay' => ['required', 'string', 'max:255'],
+            'document_type' => ['required', 'string', 'max:100'],
+            'document' => ['required', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
+        ]);
+
+        $user = $request->user();
+        $path = $request->file('document')->store('verification-documents', 'public');
+        $user->update([
+            'barangay_or_location' => $validated['barangay'],
+            'verification_status' => 'pending',
+            'is_verified' => false,
+            'verification_document_type' => $validated['document_type'],
+            'verification_document_path' => $path,
+        ]);
+
+        return response()->json([
+            'message' => 'Verification documents submitted for Trinidad review.',
+            'user' => $user->fresh()->toFrontendArray(),
+        ]);
+    }
+
     private function tokenResponse(User $user, string $device)
     {
         return response()->json([
