@@ -8,6 +8,8 @@ import Login from "./Login";
 import Register from "./Register";
 import AdminLogin from "./AdminLogin";
 import Dashboard from "./Dashboard";
+import AdminApp from "./AdminApp";
+import { clearSession, isAdminUser } from "./config/community";
 
 const App = () => {
   const [currentView, setCurrentView] = useState("landing");
@@ -15,10 +17,22 @@ const App = () => {
 
   const handleLoginSuccess = (loggedInUser) => {
     setUser(loggedInUser);
-    setCurrentView("dashboard");
+    setCurrentView(isAdminUser(loggedInUser) ? "admin-portal" : "dashboard");
   };
 
   const handleLogout = () => {
+    // Best-effort token revocation on the backend, then wipe the session.
+    const token = localStorage.getItem("token");
+    if (token) {
+      fetch("/api/logout", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      }).catch(() => {});
+    }
+    clearSession();
     setUser(null);
     setCurrentView("landing");
   };
@@ -50,6 +64,10 @@ const App = () => {
         onAdminLoginSuccess={handleLoginSuccess}
       />
     );
+  }
+
+  if (currentView === "admin-portal") {
+    return <AdminApp user={user} onLogout={handleLogout} />;
   }
 
   if (currentView === "dashboard") {
