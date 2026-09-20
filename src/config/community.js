@@ -34,9 +34,6 @@ export const TRINIDAD_BARANGAYS = [
 // The proxy forwards all /api/* requests to http://127.0.0.1:8000.
 export const API_BASE_URL = "";
 
-// Auth endpoints - paths already include the /api prefix
-export const AUTH_APIS = [API_BASE_URL];
-
 export const isAdminUser = (user) => {
   if (!user) return false;
   if (user.is_admin === true) return true;

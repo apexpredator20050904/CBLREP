@@ -1,4 +1,5 @@
 // src/lib/community.js
-import { API_BASE_URL } from "../config/community";
-
-export const AUTH_APIS = [API_BASE_URL];
+// Backwards-compatibility shim — the canonical helpers live in
+// src/config/community.js. Kept so any stale `lib/community` import
+// keeps resolving after the Express -> Laravel migration.
+export * from "../config/community";

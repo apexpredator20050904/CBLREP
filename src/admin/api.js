@@ -36,3 +36,28 @@ export const pinForResource = (r) => {
   }
   return null;
 };
+
+/**
+ * Analytics export — opens the backend export endpoint in a new tab so the
+ * browser handles the CSV/PDF download with the bearer token attached.
+ * For CSV we can also trigger a programmatic download via the link href.
+ */
+export const exportAnalyticsUrl = (params = {}, fmt = "csv") => {
+  const token = getToken();
+  const q = new URLSearchParams();
+  q.set("fmt", fmt);
+  if (params.from) q.set("from", params.from);
+  if (params.to) q.set("to", params.to);
+  if (token) q.set("token", token);
+  return `/api/admin/analytics/export?${q.toString()}`;
+};
+
+export const downloadCSV = (params = {}) => {
+  // Opens in current window so the browser triggers the file download.
+  window.location.href = exportAnalyticsUrl(params, "csv");
+};
+
+export const openPDF = (params = {}) => {
+  // Opens the print-friendly HTML in a new tab for print-to-PDF.
+  window.open(exportAnalyticsUrl(params, "pdf"), "_blank");
+};

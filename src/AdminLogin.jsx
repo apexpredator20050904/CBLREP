@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import "./auth.css";
 import logo from "./assets/logo.jpg";
+import { persistSession } from "./config/community";
 
 const AdminLogin = ({ onBackToPortal, onAdminLoginSuccess }) => {
   const [formData, setFormData] = useState({
@@ -24,7 +25,7 @@ const AdminLogin = ({ onBackToPortal, onAdminLoginSuccess }) => {
     try {
       const response = await fetch("/api/admin-login", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
           email: formData.email,
           password: formData.password,
@@ -37,6 +38,8 @@ const AdminLogin = ({ onBackToPortal, onAdminLoginSuccess }) => {
         throw new Error(result.message || "Admin login failed.");
       }
 
+      // Persist the Sanctum token so AdminApp's Bearer-token apiFetch works.
+      persistSession(result.user, result.access_token, "admin");
       onAdminLoginSuccess(result.user);
     } catch (err) {
       setError(err.message || "Unable to sign in as admin.");

@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import "./auth.css";
 import logo from "./assets/logo.jpg";
+import { isAdminUser, persistSession } from "./config/community";
 
 const Login = ({ onSwitchToRegister, onBackToPortal, onLoginSuccess }) => {
   const [email, setEmail] = useState("");
@@ -14,7 +15,8 @@ const Login = ({ onSwitchToRegister, onBackToPortal, onLoginSuccess }) => {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/api/login", {
+      // Relative /api path — forwarded to the Laravel backend by the Vite proxy.
+      const response = await fetch("/api/login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -29,8 +31,12 @@ const Login = ({ onSwitchToRegister, onBackToPortal, onLoginSuccess }) => {
         throw new Error(result.message || "Invalid credentials.");
       }
 
-      // Success: Save token and trigger login success callback
-      localStorage.setItem("token", result.access_token);
+      // Success: persist the Sanctum session, then hand the user upward.
+      persistSession(
+        result.user,
+        result.access_token,
+        isAdminUser(result.user) ? "admin" : "member",
+      );
       if (onLoginSuccess) onLoginSuccess(result.user);
     } catch (err) {
       setError(err.message || "Failed to sign in.");

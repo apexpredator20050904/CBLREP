@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { apiFetch, getToken } from "./api";
+import { apiFetch, downloadCSV, openPDF } from "./api";
 
 const AnalyticsPage = ({ showToast }) => {
   const [data, setData] = useState(null);
@@ -24,17 +24,17 @@ const AnalyticsPage = ({ showToast }) => {
 
   if (!data) return <section className="page-stack"><p>Computing analytics from the database…</p></section>;
 
-  const exportUrl = `/api/admin/analytics/export?fmt=csv&token=${getToken()}${
-    from ? `&from=${encodeURIComponent(from)}` : ""
-  }${to ? `&to=${encodeURIComponent(to)}` : ""}`;
+  const csvParams = { from: from || undefined, to: to || undefined };
+
+  const verifiedByBarangay = data.users?.verifiedByBarangay || [];
 
   return (
     <section className="page-stack">
       <div className="filter-bar">
         <label>From <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
         <label>To <input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
-        <a className="chip" href={exportUrl} download>⬇ Export CSV</a>
-        <button type="button" className="chip" onClick={() => window.print()}>🖨 Export PDF (print)</button>
+        <button type="button" className="chip" onClick={() => downloadCSV(csvParams)}>⬇ Export CSV</button>
+        <button type="button" className="chip" onClick={() => openPDF(csvParams)}>🖨 Export PDF</button>
       </div>
 
       <div className="dashboard-columns">
@@ -77,6 +77,20 @@ const AnalyticsPage = ({ showToast }) => {
                 <strong>{b.count}</strong>
               </div>
             ))}
+          </div>
+
+          <h3 className="dashboard-section-title">Verified Residents by Barangay</h3>
+          <div className="dashboard-activity-card">
+            {verifiedByBarangay.length === 0 ? (
+              <p className="table-empty">No verified residents found.</p>
+            ) : (
+              verifiedByBarangay.map((b) => (
+                <div className="health-row" key={b.barangay}>
+                  <span>{b.barangay}</span>
+                  <strong>{b.verified} resident{b.verified !== 1 ? "s" : ""}{b.students ? " ("+b.students+" student"+(b.students !== 1 ? "s" : "")+") " : ""}</strong>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

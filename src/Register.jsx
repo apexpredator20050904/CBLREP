@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import "./auth.css";
 import logo from "./assets/logo.jpg";
+import { TRINIDAD_BARANGAYS } from "./config/community";
 
 const Register = ({ onSwitchToLogin, onBackToPortal, onRegisterSuccess }) => {
   const [formData, setFormData] = useState({
@@ -39,7 +40,8 @@ const Register = ({ onSwitchToLogin, onBackToPortal, onRegisterSuccess }) => {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/api/register", {
+      // Relative /api path — forwarded to Laravel by the Vite proxy.
+      const response = await fetch("/api/register", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -195,10 +197,11 @@ const Register = ({ onSwitchToLogin, onBackToPortal, onRegisterSuccess }) => {
                 required
               >
                 <option value="">Select your barangay...</option>
-                <option value="Barangay 1">Barangay 1</option>
-                <option value="Barangay 2">Barangay 2</option>
-                <option value="Barangay 14">Barangay 14</option>
-                <option value="San Jose">San Jose</option>
+                {TRINIDAD_BARANGAYS.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
               </select>
             </div>
 
