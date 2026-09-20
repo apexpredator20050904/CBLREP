@@ -10,6 +10,8 @@ use App\Models\Resource;
 use App\Models\TimebankTransaction;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Artisan;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Admin portal endpoints backing src/admin/* pages.
@@ -29,6 +31,20 @@ class AdminPortalController extends Controller
     private function logAdminAction(Request $request, string $action, ?string $targetType = null, ?int $targetId = null, ?string $details = null): AuditLog
     {
         return AuditLog::record($request, $action, $targetType, $targetId, $details);
+    }
+
+    /** Public status consumed by the Flutter app before member actions. */
+    public function platformStatus()
+    {
+        return response()->json([
+            'maintenance' => AdminSetting::get('maintenanceMode', false),
+            'message' => AdminSetting::value(
+                'maintenanceMessage',
+                'The Trinidad portal is undergoing scheduled municipal updates. Please check back soon.'
+            ),
+            'municipality' => 'Trinidad',
+            'province' => 'Bohol',
+        ]);
     }
 
     // ------------------------------------------------------------------
@@ -793,9 +809,15 @@ class AdminPortalController extends Controller
 
         return response()->json([
             'settings' => [
-                'autoApproveListings' => AdminSetting::get('autoApproveListings', true),
-                'requireProfileVerification' => AdminSetting::get('requireProfileVerification', false),
+                'theme' => AdminSetting::value('theme', 'light'),
                 'maintenanceMode' => AdminSetting::get('maintenanceMode', false),
+                'maintenanceMessage' => AdminSetting::value(
+                    'maintenanceMessage',
+                    'The Trinidad portal is undergoing scheduled municipal updates. Please check back soon.'
+                ),
+                'activeBarangays' => AdminSetting::value('activeBarangays', [
+                    'Poblacion', 'Hinlayagan Ilaud', 'Hinlayagan Ilaya', 'San Vicente',
+                ]),
                 'updated_by' => $lastTouch?->updated_by,
             ],
         ]);
@@ -806,15 +828,21 @@ class AdminPortalController extends Controller
         $this->guard($request);
 
         $validated = $request->validate([
-            'autoApproveListings' => 'boolean',
-            'requireProfileVerification' => 'boolean',
+            'theme' => ['sometimes', 'in:light,dark'],
             'maintenanceMode' => 'boolean',
+            'maintenanceMessage' => ['sometimes', 'string', 'max:500'],
+            'activeBarangays' => ['sometimes', 'array', 'min:1'],
+            'activeBarangays.*' => ['string', 'max:100'],
         ]);
 
         $changed = [];
         foreach ($validated as $key => $value) {
-            AdminSetting::put($key, (bool) $value, $request->user()->name);
-            $changed[] = $key.':'.($value ? 'on' : 'off');
+            if ($key === 'maintenanceMode') {
+                AdminSetting::put($key, (bool) $value, $request->user()->name);
+            } else {
+                AdminSetting::putValue($key, $value, $request->user()->name);
+            }
+            $changed[] = $key;
         }
 
                 if ($changed !== []) {
@@ -826,5 +854,38 @@ class AdminPortalController extends Controller
         }
 
         return $this->settings($request);
+    }
+
+    public function clearCache(Request $request)
+    {
+        $this->guard($request);
+        Artisan::call('optimize:clear');
+        $this->logAdminAction($request, 'Cleared application cache', 'settings');
+
+        return response()->json(['message' => 'Application cache cleared.']);
+    }
+
+    public function backup(Request $request): StreamedResponse
+    {
+        $this->guard($request);
+        abort_unless(config('database.default') === 'mysql', 422, 'Database backup is configured for MySQL only.');
+
+        $binary = trim((string) shell_exec('command -v mysqldump'));
+        abort_if($binary === '', 503, 'mysqldump is not installed on the server.');
+
+        $filename = 'cblrep-trinidad-backup-'.now()->format('Y-m-d-His').'.sql';
+        $this->logAdminAction($request, 'Downloaded database backup', 'settings');
+
+        return response()->streamDownload(function () use ($binary): void {
+            $command = implode(' ', [
+                escapeshellarg($binary),
+                '--host='.escapeshellarg((string) config('database.connections.mysql.host')),
+                '--port='.escapeshellarg((string) config('database.connections.mysql.port')),
+                '--user='.escapeshellarg((string) config('database.connections.mysql.username')),
+                '--password='.escapeshellarg((string) config('database.connections.mysql.password')),
+                escapeshellarg((string) config('database.connections.mysql.database')),
+            ]);
+            passthru($command);
+        }, $filename, ['Content-Type' => 'application/sql']);
     }
 }
