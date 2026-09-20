@@ -55,7 +55,7 @@ class _PostResourceDialogState extends State<PostResourceDialog> {
               ),
               const SizedBox(height: 10),
               DropdownButtonFormField<String>(
-                value: _selectedBrgy,
+                initialValue: _selectedBrgy,
                 dropdownColor: const Color(0xFF1E3A27),
                 style: const TextStyle(color: Colors.white, fontSize: 12),
                 decoration: _inputDecoration('Select Barangay'),
