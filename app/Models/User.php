@@ -20,6 +20,8 @@ class User extends Authenticatable
         'student_status',
         'student_school',
         'time_bank_credits',
+        'verification_document_path',
+        'verification_document_type',
     ];
 
     protected $hidden = [

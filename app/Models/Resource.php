@@ -20,6 +20,7 @@ class Resource extends Model
         'location',
         'is_active',
         'status',
+        'image_path',
     ];
 
     protected $casts = [
@@ -69,6 +70,7 @@ class Resource extends Model
             ],
             'user_id' => $this->user_id,
             'created_at' => (int) ($this->created_at?->getTimestamp() ?? time()) * 1000,
+            'image_url' => $this->image_path ? asset('storage/'.$this->image_path) : null,
         ];
     }
 }
