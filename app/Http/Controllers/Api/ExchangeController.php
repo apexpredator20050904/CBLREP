@@ -57,4 +57,43 @@ class ExchangeController extends Controller
             'data' => $exchanges->values(),
         ]);
     }
+
+    /**
+     * PATCH /api/exchanges/{id} — provider/receiver status actions from the
+     * mobile My Exchanges screen (accept, complete, cancel).
+     */
+    public function update(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'status' => ['required', 'in:accepted,completed,cancelled'],
+        ]);
+
+        $userId = $request->user()->id;
+
+        $exchange = Exchange::where(function ($query) use ($userId) {
+            $query->where('provider_id', $userId)->orWhere('receiver_id', $userId);
+        })->findOrFail($id);
+
+        if ($validated['status'] === 'accepted' && $exchange->status !== 'pending') {
+            return response()->json([
+                'message' => 'Only pending exchanges can be accepted.',
+            ], 422);
+        }
+
+        $exchange->update(['status' => $validated['status']]);
+
+        $otherUser = $exchange->receiver_id === $userId ? $exchange->provider : $exchange->receiver;
+
+        return response()->json([
+            'message' => 'Exchange status updated.',
+            'exchange' => [
+                'id' => $exchange->id,
+                'type' => $exchange->frontendType(),
+                'item' => $exchange->resource?->title ?? 'Resource Exchange',
+                'withUser' => $otherUser?->name ?? 'Community Member',
+                'status' => $exchange->frontendStatus(),
+                'initiated' => $exchange->created_at?->format('M j, Y') ?? 'Today',
+            ],
+        ]);
+    }
 }
