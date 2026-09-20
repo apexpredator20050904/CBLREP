@@ -1,2 +1,27 @@
 /* Tailwind v4 entry for the CBLRE admin console. */
 @import "tailwindcss";
+
+html.dark body {
+  background: #0f2415;
+}
+
+html.dark main {
+  background: #102719;
+  color: #e5f3e8;
+}
+
+html.dark main .bg-white {
+  background: #17351f;
+  border-color: #2e5a39;
+}
+
+html.dark main .text-emerald-950,
+html.dark main .text-stone-800,
+html.dark main .text-stone-700 {
+  color: #e5f3e8;
+}
+
+html.dark main .text-stone-500,
+html.dark main .text-stone-400 {
+  color: #a8c5ae;
+}
