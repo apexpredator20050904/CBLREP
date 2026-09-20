@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\AdminPortalController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\ContentAdminController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\ExchangeController;
 use App\Http\Controllers\Api\ListingController;
@@ -22,6 +23,7 @@ use Illuminate\Support\Facades\Route;
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/admin-login', [AuthController::class, 'adminLogin']);
+Route::get('/platform/status', [AdminPortalController::class, 'platformStatus']);
 
 Route::get('/listings', [ListingController::class, 'index']);
 Route::get('/timebank/services', [TimeBankController::class, 'services']);
@@ -82,5 +84,21 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/audit-logs', [AdminPortalController::class, 'auditLogs']);
         Route::get('/settings', [AdminPortalController::class, 'settings']);
         Route::post('/settings', [AdminPortalController::class, 'storeSettings']);
+        Route::post('/settings/cache/clear', [AdminPortalController::class, 'clearCache']);
+        Route::get('/settings/backup', [AdminPortalController::class, 'backup']);
+
+        // ── Content management (/admin/content) ─────────────────────
+        // Municipal pages with custom URL slugs (draft → published).
+        Route::get('/content', [ContentAdminController::class, 'contentIndex']);
+        Route::post('/content', [ContentAdminController::class, 'contentStore']);
+        Route::patch('/content/{id}', [ContentAdminController::class, 'contentUpdate']);
+        Route::delete('/content/{id}', [ContentAdminController::class, 'contentDestroy']);
+
+        // ── Notifications & announcements (/admin/notifications) ────
+        // Draft → scheduled/sent broadcasts targeted at member segments.
+        Route::get('/notifications', [ContentAdminController::class, 'notifIndex']);
+        Route::post('/notifications', [ContentAdminController::class, 'notifStore']);
+        Route::post('/notifications/{id}/send', [ContentAdminController::class, 'notifSend']);
+        Route::delete('/notifications/{id}', [ContentAdminController::class, 'notifDestroy']);
     });
 });
