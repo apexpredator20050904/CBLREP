@@ -1,144 +1,62 @@
-import React, { useState } from "react";
-import "./App.css";
-import logo from "./assets/logo.jpg";
-import reactLogo from "./assets/react.svg";
-import viteLogo from "./assets/vite.svg";
+// ─────────────────────────────────────────────────────────────
+// CBLRE Admin · App entry — admin-only router
+// ─────────────────────────────────────────────────────────────
+// Standalone admin console for Trinidad, Bohol (municipal + barangay
+// managers). There are deliberately NO public/member screens here — the
+// Flutter mobile app serves members. The app boots at /login (Admin
+// Login); every /admin/* route is wrapped in <RequireAdmin> (RBAC guard).
+//
+// Routes:
+//   /login                  Admin Login (public, sole entry)
+//   /admin                  Dashboard overview (summary cards)
+//   /admin/verification     Trinidad resident + barangay verification
+//   /admin/users            All users (suspend / reactivate)
+//   /admin/listings         All resource listings (moderation)
+//   /admin/listings/offers  Offers only
+//   /admin/listings/needs   Needs only
+//   /admin/listings/flagged Flagged listings
+//   /admin/analytics        Municipal analytics + CSV/PDF export
+//   /admin/audit-logs       Immutable admin audit trail
+//   *                       → /login (unknown paths bounce to entry)
+// ─────────────────────────────────────────────────────────────
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { AuthProvider } from "./context/AuthContext";
+import RequireAdmin from "./components/RequireAdmin";
+import LoginPage from "./pages/LoginPage";
+import DashboardPage from "./pages/DashboardPage";
+import VerificationPage from "./pages/VerificationPage";
+import UsersPage from "./pages/UsersPage";
+import ListingsPage from "./pages/ListingsPage";
+import AnalyticsPage from "./pages/AnalyticsPage";
+import AuditLogsPage from "./pages/AuditLogsPage";
 
-import Login from "./Login";
-import Register from "./Register";
-import AdminLogin from "./AdminLogin";
-import Dashboard from "./Dashboard";
-import AdminApp from "./AdminApp";
-import { clearSession, isAdminUser } from "./config/community";
-
-const App = () => {
-  const [currentView, setCurrentView] = useState("landing");
-  const [user, setUser] = useState(null);
-
-  const handleLoginSuccess = (loggedInUser) => {
-    setUser(loggedInUser);
-    setCurrentView(isAdminUser(loggedInUser) ? "admin-portal" : "dashboard");
-  };
-
-  const handleLogout = () => {
-    // Best-effort token revocation on the backend, then wipe the session.
-    const token = localStorage.getItem("token");
-    if (token) {
-      fetch("/api/logout", {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-      }).catch(() => {});
-    }
-    clearSession();
-    setUser(null);
-    setCurrentView("landing");
-  };
-
-  if (currentView === "member-login") {
-    return (
-      <Login
-        onSwitchToRegister={() => setCurrentView("member-register")}
-        onBackToPortal={() => setCurrentView("landing")}
-        onLoginSuccess={handleLoginSuccess}
-      />
-    );
-  }
-
-  if (currentView === "member-register") {
-    return (
-      <Register
-        onSwitchToLogin={() => setCurrentView("member-login")}
-        onBackToPortal={() => setCurrentView("landing")}
-        onRegisterSuccess={() => setCurrentView("member-login")}
-      />
-    );
-  }
-
-  if (currentView === "admin-login") {
-    return (
-      <AdminLogin
-        onBackToPortal={() => setCurrentView("landing")}
-        onAdminLoginSuccess={handleLoginSuccess}
-      />
-    );
-  }
-
-  if (currentView === "admin-portal") {
-    return <AdminApp user={user} onLogout={handleLogout} />;
-  }
-
-  if (currentView === "dashboard") {
-    return <Dashboard user={user} onLogout={handleLogout} />;
-  }
-
+export default function App() {
   return (
-    <div className="hero-page">
-      <div className="hero-container">
-        <div className="logo-wrap" aria-hidden>
-          <img src={logo} alt="CBLREP logo" className="logo-img" />
-        </div>
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          {/* Sole public screen — admin sign-in */}
+          <Route path="/login" element={<LoginPage />} />
 
-        <h1 className="hero-title">
-          Community-Based
-          <br />
-          Local Resource Exchange Portal
-        </h1>
+          {/* Protected admin console (RBAC-guarded) */}
+          <Route element={<RequireAdmin />}>
+            <Route path="/admin" element={<DashboardPage />} />
+            <Route path="/admin/verification" element={<VerificationPage />} />
+            <Route path="/admin/users" element={<UsersPage />} />
+            <Route path="/admin/listings" element={<ListingsPage kind="all" />} />
+            <Route path="/admin/listings/offers" element={<ListingsPage kind="offers" />} />
+            <Route path="/admin/listings/needs" element={<ListingsPage kind="needs" />} />
+            <Route path="/admin/listings/flagged" element={<ListingsPage kind="flagged" />} />
+            <Route path="/admin/analytics" element={<AnalyticsPage />} />
+            <Route path="/admin/audit-logs" element={<AuditLogsPage />} />
+          </Route>
 
-        <p className="hero-subtitle">
-          CBLREP · Barangay-level hyper-local resource sharing
-        </p>
-
-        <div className="sign-in-label">SIGN IN AS</div>
-
-        <div className="cards">
-          <section className="card member">
-            <div>
-              <div className="role-icon member-icon" aria-hidden>
-                <img src={reactLogo} alt="member icon" width="28" height="28" />
-              </div>
-              <div className="role-title">Community Member</div>
-              <div className="role-desc">
-                Browse, post, and exchange resources with your neighbors
-              </div>
-            </div>
-            <button
-              className="btn member-btn"
-              aria-label="Member Login"
-              onClick={() => setCurrentView("member-login")}
-            >
-              Member Login →
-            </button>
-          </section>
-
-          <section className="card admin">
-            <div>
-              <div className="role-icon admin-icon" aria-hidden>
-                <img src={viteLogo} alt="admin icon" width="28" height="28" />
-              </div>
-              <div className="role-title">System Administrator</div>
-              <div className="role-desc">
-                Manage users, listings, moderation and platform reports
-              </div>
-            </div>
-            <button
-              className="btn admin-btn"
-              aria-label="Admin Login"
-              onClick={() => setCurrentView("admin-login")}
-            >
-              Admin Login →
-            </button>
-          </section>
-        </div>
-
-        <div className="hero-footer">
-          Community-Based Local Resource Exchange Portal · CBLREP © 2026
-        </div>
-      </div>
-    </div>
+          {/* Default + fallback: always land on admin login */}
+          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
   );
-};
+}
 
-export default App;
