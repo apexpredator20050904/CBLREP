@@ -38,6 +38,8 @@ class ListingModel {
   final String condition;
   final String location;
   final String owner;
+  final int ownerId;
+  final String? imageUrl;
   final bool active;
 
   const ListingModel({
@@ -50,6 +52,8 @@ class ListingModel {
     required this.condition,
     required this.location,
     required this.owner,
+    required this.ownerId,
+    this.imageUrl,
     required this.active,
   });
 
@@ -65,6 +69,10 @@ class ListingModel {
       condition: (json['condition'] ?? 'Good') as String,
       location: (json['location'] ?? '') as String,
       owner: owner is Map ? (owner['name'] ?? 'Member') as String : 'Member',
+      ownerId: owner is Map
+          ? (owner['id'] as num?)?.toInt() ?? (json['user_id'] as num?)?.toInt() ?? 0
+          : (json['user_id'] as num?)?.toInt() ?? 0,
+      imageUrl: json['image_url'] as String?,
       active: json['is_active'] != false,
     );
   }
@@ -86,6 +94,97 @@ class ExchangeModel {
         status: (json['status'] ?? 'Pending') as String,
         dueDate: json['dueDate'] as String?,
       );
+}
+
+class NotificationModel {
+  final int id;
+  final String type;
+  final String title;
+  final String body;
+  final bool read;
+  final DateTime? createdAt;
+
+  const NotificationModel({
+    required this.id,
+    required this.type,
+    required this.title,
+    required this.body,
+    required this.read,
+    this.createdAt,
+  });
+
+  factory NotificationModel.fromJson(Map<String, dynamic> json) => NotificationModel(
+        id: (json['id'] as num?)?.toInt() ?? 0,
+        type: '${json['type'] ?? 'general'}',
+        title: '${json['title'] ?? 'Notification'}',
+        body: '${json['body'] ?? ''}',
+        read: json['read_at'] != null,
+        createdAt: DateTime.tryParse('${json['created_at'] ?? ''}'),
+      );
+}
+
+class ConversationModel {
+  final int id;
+  final String memberName;
+  final String memberEmail;
+  final int unreadCount;
+  final DateTime? lastMessageAt;
+
+  const ConversationModel({
+    required this.id,
+    required this.memberName,
+    required this.memberEmail,
+    required this.unreadCount,
+    this.lastMessageAt,
+  });
+
+  factory ConversationModel.fromJson(Map<String, dynamic> json) {
+    final member = json['member'] is Map ? Map<String, dynamic>.from(json['member'] as Map) : const {};
+    return ConversationModel(
+      id: (json['id'] as num?)?.toInt() ?? 0,
+      memberName: '${member['name'] ?? 'Member'}',
+      memberEmail: '${member['email'] ?? ''}',
+      unreadCount: (json['unread_count'] as num?)?.toInt() ?? 0,
+      lastMessageAt: DateTime.tryParse('${json['last_message_at'] ?? ''}'),
+    );
+  }
+}
+
+class TimeBankModel {
+  final double balance;
+  final double earned;
+  final double spent;
+  final double pending;
+
+  const TimeBankModel({required this.balance, required this.earned, required this.spent, required this.pending});
+
+  factory TimeBankModel.fromJson(Map<String, dynamic> json) => TimeBankModel(
+        balance: (json['balance'] as num?)?.toDouble() ?? 0,
+        earned: (json['earned'] as num?)?.toDouble() ?? 0,
+        spent: (json['spent'] as num?)?.toDouble() ?? 0,
+        pending: (json['pending'] as num?)?.toDouble() ?? 0,
+      );
+}
+
+class ChatMessageModel {
+  final String id;
+  final String body;
+  final String sender;
+  final int senderId;
+  final DateTime? sentAt;
+
+  const ChatMessageModel({required this.id, required this.body, required this.sender, required this.senderId, this.sentAt});
+
+  factory ChatMessageModel.fromJson(Map<String, dynamic> json) {
+    final sender = json['sender'] is Map ? Map<String, dynamic>.from(json['sender'] as Map) : const {};
+    return ChatMessageModel(
+      id: '${json['id'] ?? ''}',
+      body: (json['body'] ?? json['message'] ?? '') as String,
+      sender: (sender['name'] ?? json['senderName'] ?? json['fromEmail'] ?? 'Member') as String,
+      senderId: (json['sender_id'] as num?)?.toInt() ?? 0,
+      sentAt: DateTime.tryParse('${json['created_at'] ?? ''}'),
+    );
+  }
 }
 
 class MessageModel {

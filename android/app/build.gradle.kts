@@ -23,6 +23,14 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // Google Maps API key resolution order: -PMAPS_API_KEY=… (CI),
+        // local.properties `mapsApiKey=…`, then an empty dev fallback.
+        val mapsKey = (project.findProperty("MAPS_API_KEY")
+            ?: project.rootProject.file("local.properties").useLines { lines ->
+                lines.firstOrNull { it.startsWith("mapsApiKey=") }?.substringAfter('=')
+            }) as String?
+        manifestPlaceholders["mapsApiKey"] = mapsKey ?: ""
     }
 
     buildTypes {

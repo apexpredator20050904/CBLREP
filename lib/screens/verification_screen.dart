@@ -1,8 +1,9 @@
 import 'dart:io';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Feedback;
 import 'package:image_picker/image_picker.dart';
 import '../config/community.dart';
 import '../core/api_service.dart';
+import '../core/feedback.dart';
 
 class VerificationScreen extends StatefulWidget {
   const VerificationScreen({super.key});
@@ -23,16 +24,27 @@ class _VerificationScreenState extends State<VerificationScreen> {
 
   Future<void> submit() async {
     if (document == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Choose a residency document first.')));
+      Feedback.info(context, 'Choose a residency document first.');
       return;
     }
     setState(() => submitting = true);
     try {
-      await ApiService.instance.submitVerification(barangay: barangay, documentType: documentType, document: document!);
-      if (mounted) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Verification submitted for admin review.'))); Navigator.pop(context); }
+      await ApiService.instance.submitVerification(
+          barangay: barangay, documentType: documentType, document: document!);
+      if (!mounted) return;
+      await Feedback.alert(
+        context,
+        title: 'Verification submitted',
+        message: 'Your $documentType for $barangay is now queued for admin review. '
+            'You will be notified once a decision is made.',
+        icon: Icons.verified_outlined,
+      );
+      if (mounted) Navigator.pop(context, true);
     } on ApiException catch (exception) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(exception.message)));
-    } finally { if (mounted) setState(() => submitting = false); }
+      if (mounted) Feedback.error(context, exception.message, onRetry: submit);
+    } finally {
+      if (mounted) setState(() => submitting = false);
+    }
   }
 
   @override
