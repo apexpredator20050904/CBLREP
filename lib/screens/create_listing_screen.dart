@@ -8,8 +8,9 @@ import '../core/feedback.dart';
 import '../providers/listings_provider.dart';
 import '../theme/cblrep_theme.dart';
 
-/// Post Listing — offers & needs with category, exchange mode (freecycle /
-/// barter / lend), condition, barangay and camera/gallery photo upload.
+/// Post Listing — offers & needs with category, condition, barangay and
+/// camera/gallery photo upload. CBLREP runs on direct bartering only, so a
+/// listing carries no exchange-mode field.
 class CreateListingScreen extends StatefulWidget {
   const CreateListingScreen({super.key});
   @override
@@ -18,16 +19,25 @@ class CreateListingScreen extends StatefulWidget {
 
 class _CreateListingScreenState extends State<CreateListingScreen> {
   final formKey = GlobalKey<FormState>();
-  final title = TextEditingController(), description = TextEditingController();
+  final title = TextEditingController(), description = TextEditingController(), purok = TextEditingController();
+  final price = TextEditingController();
   String category = 'Tools';
-  String type = 'offer', exchangeType = 'Lend', condition = 'Good', barangay = trinidadBarangays.first;
+  String type = 'offer', condition = 'Good', barangay = trinidadBarangays.first;
+  // Flexible compensation: free | barter | paid.
+  String compensation = 'barter';
   File? image;
   bool saving = false;
 
   static const categories = ['Tools', 'Food', 'Clothing', 'Furniture', 'Electronics', 'Books', 'Skills', 'Services', 'Plants', 'Other'];
 
+  static const _compensationCopy = {
+    'free': 'Free sharing — you are giving this away at no cost.',
+    'barter': 'Barter — a neighbour offers an item or skill in return.',
+    'paid': 'Paid — set a price and neighbours can inquire to buy.',
+  };
+
   @override
-  void dispose() { title.dispose(); description.dispose(); super.dispose(); }
+  void dispose() { title.dispose(); description.dispose(); purok.dispose(); price.dispose(); super.dispose(); }
 
   Future<void> pickImage(ImageSource source) async {
     final picked = await ImagePicker().pickImage(source: source, imageQuality: 80, maxWidth: 1600);
@@ -57,9 +67,13 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
             type: type,
             description: description.text.trim(),
             category: category,
-            exchangeType: exchangeType,
             condition: condition,
-            location: barangay,
+            location: '$barangay, ${purok.text.trim()}',
+            barangay: barangay,
+            purokSitio: purok.text.trim(),
+            // Only a paid listing carries a price; free/barter send none.
+            compensationType: compensation,
+            price: compensation == 'paid' ? double.tryParse(price.text.trim()) : null,
             image: image,
           );
       if (!mounted) return;
@@ -98,12 +112,34 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
             onChanged: (value) => setState(() => category = value ?? category),
           ),
           const SizedBox(height: 12),
-          DropdownButtonFormField(
-            initialValue: exchangeType,
-            decoration: const InputDecoration(labelText: 'Exchange mode'),
-            items: const [DropdownMenuItem(value: 'Freecycle', child: Text('Freecycle — free gifting')), DropdownMenuItem(value: 'Barter', child: Text('Barter — direct swap')), DropdownMenuItem(value: 'Lend', child: Text('Lend — temporary, scheduled return'))],
-            onChanged: (value) => setState(() => exchangeType = value!),
+          // How the member wants to share: Free, Barter or Paid. This is the
+          // flexible-compensation choice the whole portal is built around.
+          SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(value: 'free', label: Text('Free'), icon: Icon(Icons.card_giftcard)),
+              ButtonSegment(value: 'barter', label: Text('Barter'), icon: Icon(Icons.swap_horiz)),
+              ButtonSegment(value: 'paid', label: Text('Paid'), icon: Icon(Icons.sell_outlined)),
+            ],
+            selected: {compensation},
+            onSelectionChanged: (value) => setState(() => compensation = value.first),
           ),
+          const SizedBox(height: 8),
+          _CompensationNotice(type: compensation, copy: _compensationCopy[compensation]!),
+          if (compensation == 'paid') ...[
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: price,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: 'Price (₱)', prefixText: '₱ '),
+              validator: (v) {
+                if (compensation != 'paid') return null;
+                final parsed = double.tryParse((v ?? '').trim());
+                if (parsed == null) return 'Enter a price';
+                if (parsed <= 0) return 'Price must be greater than zero';
+                return null;
+              },
+            ),
+          ],
           const SizedBox(height: 12),
           DropdownButtonFormField(
             initialValue: condition,
@@ -117,6 +153,17 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
             decoration: const InputDecoration(labelText: 'Trinidad barangay'),
             items: trinidadBarangays.map((value) => DropdownMenuItem(value: value, child: Text(value))).toList(),
             onChanged: (value) => setState(() => barangay = value!),
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: purok,
+            decoration: const InputDecoration(labelText: 'Purok / Sitio'),
+            validator: (v) {
+                final t = (v ?? '').trim();
+                if (t.isEmpty) return 'Enter the purok or sitio';
+                if (!t.startsWith('Purok') && !t.startsWith('Sitio')) return 'Use a format like "Purok 3" or "Sitio Name"';
+                return null;
+              },
           ),
           const SizedBox(height: 12),
           GestureDetector(
@@ -133,6 +180,39 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
           FilledButton(onPressed: saving ? null : save, child: Text(saving ? 'Posting…' : 'Post resource')),
         ]),
       ),
+    );
+  }
+}
+
+/// Read-only banner describing the selected sharing mode. Colour-coded so the
+/// three compensation types read as clearly on the form as they do on a card.
+class _CompensationNotice extends StatelessWidget {
+  final String type;
+  final String copy;
+  const _CompensationNotice({required this.type, required this.copy});
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final (Color accent, IconData icon) = switch (type) {
+      'free' => (CblrepColors.compFree, Icons.card_giftcard),
+      'paid' => (CblrepColors.compPaid, Icons.sell_outlined),
+      _ => (CblrepColors.compBarter, Icons.swap_horiz),
+    };
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: dark ? CblrepColors.darkCardGreen : const Color(0xFFEFE9DA),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: dark ? Colors.white12 : Colors.black12),
+      ),
+      child: Row(children: [
+        Icon(icon, size: 18, color: accent),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(copy, style: const TextStyle(fontSize: 11, height: 1.35)),
+        ),
+      ]),
     );
   }
 }

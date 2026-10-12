@@ -1,19 +1,17 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// App-level settings: theme mode, notifications, proximity radius.
+/// App-level settings: theme mode and notification preferences.
 class AppSettingsProvider extends ChangeNotifier {
   static const _themeKey = 'cblrep_theme_mode';
   static const _notifKey = 'cblrep_notif_enabled';
   static const _exchangeAlertKey = 'cblrep_exchange_alerts';
   static const _messageAlertKey = 'cblrep_message_alerts';
-  static const _radiusKey = 'cblrep_radius_km';
 
   bool darkMode = true;
   bool notificationsEnabled = true;
   bool exchangeAlerts = true;
   bool messageAlerts = true;
-  double radiusKm = 5.0;
   bool loaded = false;
 
   Future<void> load() async {
@@ -22,7 +20,6 @@ class AppSettingsProvider extends ChangeNotifier {
     notificationsEnabled = prefs.getBool(_notifKey) ?? true;
     exchangeAlerts = prefs.getBool(_exchangeAlertKey) ?? true;
     messageAlerts = prefs.getBool(_messageAlertKey) ?? true;
-    radiusKm = prefs.getDouble(_radiusKey) ?? 5.0;
     loaded = true;
     notifyListeners();
   }
@@ -49,11 +46,5 @@ class AppSettingsProvider extends ChangeNotifier {
     messageAlerts = value;
     notifyListeners();
     (await SharedPreferences.getInstance()).setBool(_messageAlertKey, value);
-  }
-
-  Future<void> setRadius(double value) async {
-    radiusKm = value;
-    notifyListeners();
-    (await SharedPreferences.getInstance()).setDouble(_radiusKey, value);
   }
 }

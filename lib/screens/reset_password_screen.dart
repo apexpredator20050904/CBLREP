@@ -152,10 +152,10 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
               ),
             ),
             const SizedBox(height: 10),
-            const Text(
+            Text(
               'Choosing a new password here signs out every other device.',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 10, color: Colors.black45),
+              style: TextStyle(fontSize: 10, color: dark ? Colors.white54 : Colors.black45),
             ),
           ],
         ),

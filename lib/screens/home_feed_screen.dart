@@ -2,16 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../config/community.dart';
 import '../core/api_service.dart';
+import '../core/feedback.dart' as feedback;
 import '../models/models.dart';
-import '../providers/app_settings_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/listings_provider.dart';
 import '../providers/live_hub_provider.dart';
 import '../theme/cblrep_theme.dart';
+import '../widgets/empty_state.dart';
 import '../widgets/listing_card.dart';
 import '../widgets/welcome_header.dart';
 import 'listing_detail_screen.dart';
-import 'notifications_screen.dart';
 
 /// Home feed — live offer/need grid with search, barangay + proximity
 /// filters, welcome header and maintenance banner. Auto-refreshes via
@@ -27,7 +27,6 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
   final search = TextEditingController();
   String? barangay;
   String segment = 'all'; // all | offer | request
-  String mode = 'all'; // all | Freecycle | Barter | Lend
   bool maintenance = false;
   String maintenanceMessage = '';
 
@@ -69,14 +68,11 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
     final loading = context.select<ListingsProvider, bool>((p) => p.loading);
     final loadError = context.select<ListingsProvider, String?>((p) => p.error);
     final listings = context.select<ListingsProvider, List<ListingModel>>((p) => p.listings);
-    final unreadCount = context.select<LiveHubProvider, int>((p) => p.unreadCount);
     final lastUpdated = context.select<LiveHubProvider, DateTime?>((p) => p.lastUpdated);
-    final radius = context.select<AppSettingsProvider, double>((p) => p.radiusKm);
     final dark = Theme.of(context).brightness == Brightness.dark;
     var visible = listings.where((item) {
       if (segment == 'offer' && item.type == 'request') return false;
       if (segment == 'request' && item.type != 'request') return false;
-      if (mode != 'all' && item.exchangeType.toLowerCase() != mode.toLowerCase()) return false;
       return true;
     }).toList();
     final liveHub = context.read<LiveHubProvider>();
@@ -106,7 +102,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                   subtitle: Text(maintenanceMessage),
                 ),
               ),
-            WelcomeHeader(name: memberName, subtitle: '$communityName · within ${radius.toStringAsFixed(0)} km'),
+            WelcomeHeader(name: memberName, subtitle: '$communityName · by barangay & purok'),
             const SizedBox(height: 12),
             TextField(
               controller: search,
@@ -133,7 +129,6 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                 ),
               ),
               const SizedBox(width: 8),
-              IconButton.filledTonal(tooltip: 'Notifications', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsScreen())), icon: Badge(label: Text('$unreadCount'), isLabelVisible: unreadCount > 0, child: const Icon(Icons.notifications_outlined, size: 20))),
             ]),
             const SizedBox(height: 8),
             SegmentedButton<String>(
@@ -145,23 +140,16 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
               selected: {segment},
               onSelectionChanged: (v) => setState(() => segment = v.first),
             ),
-            const SizedBox(height: 8),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(children: [
-                for (final m in ['all', 'Freecycle', 'Barter', 'Lend'])
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(label: Text(m == 'all' ? 'All modes' : m), selected: mode == m, selectedColor: CblrepColors.actionOrange, labelStyle: TextStyle(color: mode == m ? Colors.white : null, fontWeight: FontWeight.bold, fontSize: 11), onSelected: (_) => setState(() => mode = m)),
-                  ),
-              ]),
-            ),
             const SizedBox(height: 12),
             if (loading) const Center(child: CircularProgressIndicator()),
             if (loadError != null)
-              Card(child: ListTile(leading: const Icon(Icons.error_outline), title: const Text('Could not load listings'), subtitle: Text(loadError))),
+              _ConnectionErrorCard(message: loadError, onRetry: refresh),
             if (!loading && loadError == null && visible.isEmpty)
-              const Card(child: Padding(padding: EdgeInsets.all(24), child: Text('No active resources match your filters.', textAlign: TextAlign.center))),
+              EmptyState(
+                icon: Icons.search_off,
+                title: 'No resources found',
+                subtitle: 'No active resources match your filters. Try broadening your search.',
+              ),
             ]),
           ),
           // Lazy grid: only the on-screen cards are built/painted. The old
@@ -174,7 +162,13 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                   crossAxisCount: wide ? 3 : 2,
                   mainAxisSpacing: 12,
                   crossAxisSpacing: 12,
-                  childAspectRatio: 0.82,
+                  // Taller cells for the 2-up phone grid. The card body now
+                  // carries title (2 lines) + meta + location chip + author,
+                  // so a fixed 0.74 clipped the author line on short screens
+                  // (small Galaxy A-series: ~320dp wide → ~145dp cells). The
+                  // card's image is Flexible, so a generous ratio simply
+                  // yields a taller photo rather than dead space.
+                  childAspectRatio: wide ? 0.72 : 0.66,
                 ),
                 delegate: SliverChildBuilderDelegate(
                   childCount: visible.length,
@@ -202,5 +196,88 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
     if (d.inMinutes < 1) return '${d.inSeconds}s ago';
     if (d.inMinutes < 60) return '${d.inMinutes}m ago';
     return '${d.inHours}h ago';
+  }
+}
+
+/// Explicit failure state for the listings feed.
+///
+/// The message from [ApiService] already names the host the app tried, so the
+/// card shows that plus a retry — a network failure must never look like an
+/// empty dashboard.
+class _ConnectionErrorCard extends StatelessWidget {
+  final String message;
+  final Future<void> Function() onRetry;
+
+  const _ConnectionErrorCard({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: dark ? CblrepColors.darkCardGreen : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: CblrepColors.dangerRed.withValues(alpha: 0.45)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.wifi_off, color: CblrepColors.dangerRed, size: 20),
+            const SizedBox(width: 8),
+            Text(
+              'Could not load listings',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+                color: dark ? Colors.white : Colors.black87,
+              ),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            style: TextStyle(fontSize: 12, color: dark ? Colors.white70 : Colors.black54),
+          ),
+          const SizedBox(height: 4),
+          Row(children: [
+            Icon(Icons.dns_outlined, size: 12, color: dark ? Colors.white54 : Colors.black45),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                'Trying ${ApiService.instance.baseUrlHost}',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: dark ? Colors.white54 : Colors.black45,
+                ),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 12),
+          Row(children: [
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: CblrepColors.actionOrange,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              ),
+              onPressed: () => onRetry(),
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('Retry'),
+            ),
+            const SizedBox(width: 8),
+            TextButton(
+              onPressed: () => feedback.Feedback.info(
+                context,
+                'Showing the last loaded results. Pull down to refresh.',
+              ),
+              child: const Text('Dismiss'),
+            ),
+          ]),
+        ],
+      ),
+    );
   }
 }

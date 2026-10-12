@@ -54,7 +54,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       margin: const EdgeInsets.only(bottom: 10),
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: n.read ? (dark ? CblrepColors.cardGrey.withValues(alpha: 0.55) : Colors.white) : (dark ? CblrepColors.cardGrey : Colors.white),
+                        color: n.read ? (dark ? CblrepColors.darkCardGreen.withValues(alpha: 0.55) : Colors.white) : (dark ? CblrepColors.darkCardGreen : Colors.white),
                         borderRadius: BorderRadius.circular(12),
                         border: n.read ? null : Border.all(color: CblrepColors.actionOrange, width: 1.2),
                       ),
@@ -62,10 +62,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                         Container(width: 38, height: 38, decoration: BoxDecoration(color: _colorFor(n.type), borderRadius: BorderRadius.circular(10)), child: Icon(_iconFor(n.type), color: Colors.white, size: 20)),
                         const SizedBox(width: 10),
                         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text(n.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.black)),
+                          Text(n.title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: dark ? Colors.white : Colors.black)),
                           const SizedBox(height: 2),
-                          Text(n.body, style: const TextStyle(fontSize: 11, color: Colors.black87)),
-                          if (n.createdAt != null) Text(_ago(n.createdAt!), style: const TextStyle(fontSize: 10, color: Colors.black45)),
+                          Text(n.body, style: TextStyle(fontSize: 11, color: dark ? Colors.white : Colors.black87)),
+                          if (n.createdAt != null) Text(_ago(n.createdAt!), style: TextStyle(fontSize: 10, color: dark ? Colors.white54 : Colors.black45)),
                         ])),
                         if (!n.read) TextButton(onPressed: () => hub.markNotificationRead(n.id), child: const Text('Read', style: TextStyle(fontSize: 11))),
                       ]),

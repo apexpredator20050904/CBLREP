@@ -5,6 +5,7 @@ import '../core/feedback.dart';
 import '../core/input_sanitizer.dart';
 import '../providers/auth_provider.dart';
 import '../theme/cblrep_theme.dart';
+import '../widgets/cblrep_shell.dart';
 import '../widgets/password_field.dart';
 
 /// Spacing tokens so every gap on the form stays consistent across screen
@@ -21,7 +22,7 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   final formKey = GlobalKey<FormState>();
-  final name = TextEditingController(), email = TextEditingController(), password = TextEditingController(), confirm = TextEditingController();
+  final name = TextEditingController(), email = TextEditingController(), password = TextEditingController(), confirm = TextEditingController(), purok = TextEditingController();
   String barangay = trinidadBarangays.first;
 
   /// Inline error message shown just above the Register button. It is part of
@@ -30,7 +31,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   String? errorMessage;
 
   @override
-  void dispose() { name.dispose(); email.dispose(); password.dispose(); confirm.dispose(); super.dispose(); }
+  void dispose() { name.dispose(); email.dispose(); password.dispose(); confirm.dispose(); purok.dispose(); super.dispose(); }
 
   Future<void> submit() async {
     if (!formKey.currentState!.validate()) return;
@@ -41,11 +42,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
             name: InputSanitizer.name(name.text),
             email: InputSanitizer.email(email.text),
             barangay: barangay,
+            purokSitio: purok.text.trim(),
             password: password.text,
           );
-      if (mounted) {
-        Feedback.success(context, 'Welcome to CBLREP, ${InputSanitizer.name(name.text)}!');
-      }
+      if (!mounted) return;
+      Feedback.success(context, 'Welcome to CBLREP, ${InputSanitizer.name(name.text)}!');
+      // register() signs the new member in automatically; replace the auth
+      // stack so they land straight on the dashboard and cannot navigate Back
+      // to the Register screen.
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const CblrepShell()),
+        (route) => false,
+      );
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -61,6 +69,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     // Select only the loading flag — the whole form no longer rebuilds for
     // any other auth-provider change.
     final authLoading = context.select<AuthProvider, bool>((p) => p.loading);
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       appBar: AppBar(title: const Text('Create account', style: TextStyle(fontSize: 16))),
       body: Form(
@@ -76,9 +85,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 4),
-            const Text('Members of Trinidad, Bohol can gift, barter and lend resources.',
+            Text('Members of Trinidad, Bohol can barter resources.',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 11, color: Colors.black54)),
+                style: TextStyle(fontSize: 11, color: dark ? Colors.white70 : Colors.black54)),
             const SizedBox(height: _sectionGap),
             TextFormField(
               controller: name,
@@ -107,6 +116,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
               decoration: const InputDecoration(labelText: 'Trinidad barangay', prefixIcon: Icon(Icons.location_on_outlined)),
               items: trinidadBarangays.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
               onChanged: (value) => setState(() => barangay = value!),
+            ),
+            const SizedBox(height: _fieldGap),
+            TextFormField(
+              controller: purok,
+              decoration: const InputDecoration(labelText: 'Purok or Sitio', prefixIcon: Icon(Icons.home_work_outlined)),
+              validator: (v) {
+                final t = (v ?? '').trim();
+                if (t.isEmpty) return 'Enter your purok or sitio';
+                if (!t.startsWith('Purok') && !t.startsWith('Sitio')) return 'Use a format like "Purok 3" or "Sitio Name"';
+                return null;
+              },
             ),
             const SizedBox(height: _fieldGap),
             PasswordField(
@@ -143,11 +163,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
               child: Text(authLoading ? 'Creating account…' : 'Register'),
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'By registering you agree to share resources respectfully with your '
               'barangay. CBLREP staff review new listings for community safety.',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 10, color: Colors.black45),
+              style: TextStyle(fontSize: 10, color: dark ? Colors.white54 : Colors.black45),
             ),
           ],
         ),

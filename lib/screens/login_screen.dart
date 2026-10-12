@@ -5,6 +5,7 @@ import '../core/feedback.dart';
 import '../core/input_sanitizer.dart';
 import '../providers/auth_provider.dart';
 import '../theme/cblrep_theme.dart';
+import '../widgets/cblrep_shell.dart';
 import '../widgets/password_field.dart';
 import 'forgot_password_screen.dart';
 import 'register_screen.dart';
@@ -26,9 +27,20 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> submit() async {
     if (!formKey.currentState!.validate()) return;
     FocusScope.of(context).unfocus();
+    final auth = context.read<AuthProvider>();
+    // The banner is dismissed once a new attempt starts, so a failed retry
+    // does not leave stale "session ended" text above the form.
+    if (auth.sessionExpired) auth.clearSessionExpiredNotice();
     try {
-      await context.read<AuthProvider>().login(email.text, password.text);
-      if (mounted) Feedback.success(context, 'Signed in. Welcome back!');
+      await auth.login(email.text, password.text);
+      if (!mounted) return;
+      Feedback.success(context, 'Signed in. Welcome back!');
+      // Replace the whole auth stack: a signed-in member lands on the
+      // dashboard immediately and Back can never return to the login screen.
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const CblrepShell()),
+        (route) => false,
+      );
     } catch (_) {
       if (mounted) {
         Feedback.error(
@@ -55,6 +67,36 @@ class _LoginScreenState extends State<LoginScreen> {
               child: Form(
                 key: formKey,
                 child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  // Why the member is back here after a session that looked
+                  // signed in: say it, don't leave them guessing.
+                  if (context.watch<AuthProvider>().sessionExpired)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: CblrepColors.actionOrange.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                              color: CblrepColors.actionOrange.withValues(alpha: 0.5)),
+                        ),
+                        child: Row(children: [
+                          const Icon(Icons.info_outline,
+                              size: 18, color: CblrepColors.actionOrange),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Your session ended. Please sign in again.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: dark ? Colors.white : Colors.black87,
+                              ),
+                            ),
+                          ),
+                        ]),
+                      ),
+                    ),
                   const Center(child: CblrepLogo(radius: 44, padding: 3)),
                   const SizedBox(height: 14),
                   Text('CBLREP', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w900, fontSize: 26, letterSpacing: 3, color: dark ? Colors.white : CblrepColors.brandGreen)),
@@ -65,8 +107,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     child: Padding(
                       padding: const EdgeInsets.all(18),
                       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                        Text('Welcome back', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.black)),
-                        const Text('Sign in to swap, lend and gift with neighbours.', style: TextStyle(fontSize: 11, color: Colors.black54)),
+                        Text('Welcome back', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: dark ? Colors.white : Colors.black)),
+                        Text('Sign in to swap resources with neighbours.', style: TextStyle(fontSize: 11, color: dark ? Colors.white70 : Colors.black54)),
                         const SizedBox(height: 14),
                         TextFormField(controller: email, keyboardType: TextInputType.emailAddress, autocorrect: false, textInputAction: TextInputAction.next, decoration: const InputDecoration(labelText: 'Email', prefixIcon: Icon(Icons.email_outlined)), validator: (value) { final clean = InputSanitizer.email(value ?? ''); if (clean.isEmpty) return 'Email is required'; if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(clean)) return 'Enter a valid email'; return null; }),
                         const SizedBox(height: 12),

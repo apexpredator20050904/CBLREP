@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import '../providers/app_settings_provider.dart';
 import '../providers/auth_provider.dart';
 import '../theme/cblrep_theme.dart';
-import 'login_screen.dart';
 
 /// Professional Settings — appearance, notifications, account, app info.
 class SettingsScreen extends StatelessWidget {
@@ -42,15 +41,9 @@ class SettingsScreen extends StatelessWidget {
           ]),
           _section(context, 'Discovery', [
             ListTile(
-              title: const Text('Proximity radius'),
-              subtitle: Text('Within ${settings.radiusKm.toStringAsFixed(0)} km of Trinidad'),
-            ),
-            Slider(
-              value: settings.radiusKm,
-              min: 1, max: 20, divisions: 19,
-              label: '${settings.radiusKm.toStringAsFixed(0)} km',
-              activeColor: CblrepColors.actionOrange,
-              onChanged: (v) => settings.setRadius(v),
+              leading: const Icon(Icons.location_on_outlined),
+              title: const Text('Hyper-local discovery'),
+              subtitle: const Text('Browse by your barangay and purok or sitio — Trinidad, Bohol only.'),
             ),
           ]),
           _section(context, 'Notifications', [
@@ -63,7 +56,7 @@ class SettingsScreen extends StatelessWidget {
             ),
             SwitchListTile(
               title: const Text('Exchange updates'),
-              subtitle: const Text('Requests, approvals, returns'),
+              subtitle: const Text('Requests, approvals, completions'),
               value: settings.exchangeAlerts,
               activeColor: CblrepColors.actionOrange,
               onChanged: settings.notificationsEnabled ? (v) => settings.setExchangeAlerts(v) : null,
@@ -80,25 +73,14 @@ class SettingsScreen extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.verified_outlined),
               title: Text('Verification: ${auth.user?.verificationStatus ?? 'Pending'}'),
-              subtitle: Text(auth.user?.barangay ?? ''),
-            ),
-            ListTile(
-              leading: const Icon(Icons.logout, color: Colors.redAccent),
-              title: const Text('Sign out'),
-              onTap: () async {
-                await context.read<AuthProvider>().logout();
-                if (context.mounted) {
-                  Navigator.of(context).pushAndRemoveUntil(
-                    MaterialPageRoute(builder: (_) => const LoginScreen()), (_) => false);
-                }
-              },
+              subtitle: Text([auth.user?.barangay ?? '', auth.user?.purokSitio ?? ''].where((p) => p.isNotEmpty).join(' · ')),
             ),
           ]),
           _section(context, 'About CBLREP', [
             const ListTile(
               leading: Icon(Icons.info_outline),
               title: Text('Community-Based Local Resources Exchange Portal'),
-              subtitle: Text('Trinidad, Bohol · v1.0.0+1\nFreecycle · Barter · Lend · Time Bank'),
+              subtitle: Text('Trinidad, Bohol · v1.0.0+1\nFree · Barter · Paid — 20 official barangays'),
             ),
           ]),
         ],
@@ -112,14 +94,14 @@ class SettingsScreen extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.symmetric(vertical: 6),
       decoration: BoxDecoration(
-        color: dark ? CblrepColors.cardGrey : Colors.white,
+        color: dark ? CblrepColors.darkCardGreen : Colors.white,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
           child: Text(title.toUpperCase(),
-              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.2, color: Colors.black54)),
+              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1.2, color: dark ? Colors.white70 : Colors.black54)),
         ),
         ...children,
       ]),

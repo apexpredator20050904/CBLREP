@@ -50,6 +50,17 @@ class ListingsProvider extends ChangeNotifier {
         error = exception.message;
         changed = true;
       }
+    } catch (unexpected) {
+      // Anything that is not an ApiException (a parsing error on a malformed
+      // payload, a storage plugin failure) used to escape load() as an
+      // unhandled async error, leaving the feed frozen on whatever it last
+      // rendered with no way to recover.
+      debugPrint('[CBLREP] listings load failed: $unexpected');
+      const message = 'Unexpected problem loading listings. Please retry.';
+      if (error != message) {
+        error = message;
+        changed = true;
+      }
     } finally {
       if (loading) {
         loading = false;
@@ -73,7 +84,7 @@ class ListingsProvider extends ChangeNotifier {
 
   /// Poll the backend so listings stay fresh in real time. Background polls
   /// skip the loading spinner so the grid is never torn down mid-scroll.
-  void startAutoRefresh({Duration interval = const Duration(seconds: 30)}) {
+  void startAutoRefresh({Duration interval = const Duration(seconds: 12)}) {
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(interval, (_) {
       if (!loading) load(showSpinner: false);
@@ -92,9 +103,12 @@ class ListingsProvider extends ChangeNotifier {
     required String type,
     required String description,
     required String category,
-    required String exchangeType,
     required String condition,
     required String location,
+    required String barangay,
+    required String purokSitio,
+    String compensationType = 'barter',
+    double? price,
     File? image,
   }) async {
     final created = await api.createListing(
@@ -103,9 +117,12 @@ class ListingsProvider extends ChangeNotifier {
       type: type,
       description: InputSanitizer.text(description, max: 2000),
       category: category,
-      exchangeType: exchangeType,
       condition: condition,
       location: InputSanitizer.name(location),
+      barangay: barangay,
+      purokSitio: InputSanitizer.name(purokSitio),
+      compensationType: compensationType,
+      price: price,
       image: image,
     );
     await load();

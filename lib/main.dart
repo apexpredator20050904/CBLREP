@@ -43,14 +43,111 @@ class MyApp extends StatelessWidget {
   }
 }
 
+/// Launch gate: shows a spinner while the stored session is restored, then
+/// either the dashboard (valid saved session) or the login screen. Sign-in,
+/// sign-up and sign-out navigate imperatively with `pushAndRemoveUntil`, so
+/// this gate only decides the very first screen of an app launch.
+///
+/// A failed restore (usually "can't reach the server") renders an explicit
+/// error card with a retry button rather than an endless spinner or a blank
+/// screen.
 class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     if (auth.loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 14),
+              Text(
+                'Connecting to the CBLREP server…',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+      );
     }
+
+    final failure = auth.restoreError;
+    if (failure != null && !auth.isAuthenticated) {
+      return _RestoreFailed(message: failure, onRetry: auth.retryRestore);
+    }
+
     return auth.isAuthenticated ? const CblrepShell() : const LoginScreen();
+  }
+}
+
+/// Shown when the app cannot validate the saved session because the API is
+/// unreachable. Offering both "retry" and "continue as guest" means a member
+/// is never trapped by a backend outage.
+class _RestoreFailed extends StatelessWidget {
+  final String message;
+  final Future<void> Function() onRetry;
+
+  const _RestoreFailed({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    color: scheme.errorContainer,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Icon(Icons.cloud_off, size: 36, color: scheme.onErrorContainer),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  "Can't reach the server",
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 20),
+                FilledButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Retry'),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () {
+                    // Explicit, intentional reset of the restore attempt so the
+                    // gate falls through to the login form.
+                    context.read<AuthProvider>().dismissRestoreError();
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(builder: (_) => const LoginScreen()),
+                      (_) => false,
+                    );
+                  },
+                  child: const Text('Continue to sign in'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

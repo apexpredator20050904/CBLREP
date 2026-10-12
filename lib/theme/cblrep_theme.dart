@@ -27,6 +27,20 @@ class CblrepColors {
   static const goldHighlight = Color(0xFFF2C25C);
   static const successGreen = Color(0xFF3E9B5F);
   static const dangerRed = Color(0xFFD64545);
+
+  /// Compensation-family accents — kept consistent across cards, badges,
+  /// chat rows, the map, and the create-listing form:
+  ///   FREE → soft community green, BARTER → warm amber, PAID → crisp blue.
+  static const compFree = Color(0xFF2F9E5F);
+  static const compBarter = Color(0xFFD9822B);
+  static const compPaid = Color(0xFF2563EB);
+
+  /// Accent colour for a compensation family (`free`/`barter`/`paid`).
+  static Color compensationColor(String type) => switch (type) {
+        'free' => compFree,
+        'paid' => compPaid,
+        _ => compBarter,
+      };
 }
 
 /// Reusable branded logo avatar — official CBLREP logo from the portal.
@@ -120,13 +134,22 @@ class CblrepTheme {
           fontWeight: FontWeight.bold,
         ),
       ),
-      drawerTheme: DrawerThemeData(backgroundColor: scaffold),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: dark ? const Color(0xFF142B1D) : Colors.white,
         indicatorColor: CblrepColors.actionOrange,
-        labelTextStyle: WidgetStatePropertyAll(
-          TextStyle(color: dark ? Colors.white70 : Colors.black54, fontSize: 11, fontWeight: FontWeight.w600),
-        ),
+        height: 64,
+        iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(
+              color: states.contains(WidgetState.selected)
+                  ? Colors.white
+                  : (dark ? Colors.white54 : Colors.black45),
+            )),
+        labelTextStyle: WidgetStateProperty.resolveWith((states) => TextStyle(
+              color: states.contains(WidgetState.selected)
+                  ? (dark ? Colors.white : CblrepColors.brandGreen)
+                  : (dark ? Colors.white54 : Colors.black54),
+              fontSize: 11,
+              fontWeight: states.contains(WidgetState.selected) ? FontWeight.w800 : FontWeight.w600,
+            )),
       ),
       snackBarTheme: const SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
@@ -134,7 +157,7 @@ class CblrepTheme {
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: CblrepColors.cardGrey,
+          backgroundColor: CblrepColors.darkCardGreen,
           foregroundColor: Colors.black,
           elevation: 0,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -184,9 +207,11 @@ class CblrepTheme {
         ),
       ),
       cardTheme: CardThemeData(
-        color: dark ? CblrepColors.cardGrey : Colors.white,
-        elevation: dark ? 0 : 1,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        color: dark ? CblrepColors.darkCardGreen : Colors.white,
+        elevation: dark ? 0 : 2,
+        shadowColor: Colors.black26,
+        margin: const EdgeInsets.all(0),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
       // Branded overlays so dropdown menus, dialogs and progress spinners stay
       // readable and on-brand in both light and dark modes.

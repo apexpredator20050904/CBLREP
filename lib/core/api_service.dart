@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'input_sanitizer.dart';
@@ -21,48 +22,103 @@ class ApiService {
   static const _tokenKey = 'cblrep_member_token';
 
   // ── API base URL resolution ──────────────────────────────────────────────
-  // `--dart-define=CBLREP_API_URL=…` always wins when provided. Otherwise the
-  // reachable address is picked at runtime from [baseUrlCandidates] because
-  // it depends on where the app runs:
+  // The production URL is supplied at BUILD time and never hardcoded:
   //
-  //   Android emulator → http://10.0.2.2:8000/api  (host loopback alias)
-  //   iOS simulator    → http://127.0.0.1:8000/api (shares the host network)
-  //   Physical device  → http://127.0.0.1:8000/api works after
-  //                      `adb reverse tcp:8000 tcp:8000`; otherwise run the
-  //                      app with --dart-define=CBLREP_LAN_IP=<pc-ip> so the
-  //                      dev machine is reached over the same Wi-Fi network.
+  //   flutter build apk --release \
+  //     --dart-define=CBLREP_API_URL=https://your-api-host.com/api
+  //
+  // The value is baked into the binary by the Dart compiler, so a shipped APK
+  // always talks to exactly the host it was built for.
+  //
+  // In release builds a missing CBLREP_API_URL is a hard configuration error:
+  // the emulator/LAN/localhost candidates are dev-only and are NOT compiled
+  // into a release APK, because `baseUrlCandidates` is built from
+  // `kReleaseMode` at the top level (see [releaseConfigError]).
   static const _envBaseUrl = String.fromEnvironment('CBLREP_API_URL');
-  static const _envLanIp = String.fromEnvironment('CBLREP_LAN_IP');
+
+  /// Set for every debug/profile run so the dev helpers below can tell a
+  /// release build (production host only) from a local one.
+  static const bool _isReleaseBuild = bool.fromEnvironment('dart.vm.product');
+
+  // Dev-only overrides — ignored entirely by release builds.
+  static const _envLanIp = String.fromEnvironment('CBLREP_LAN_IP',
+      defaultValue: '192.168.1.74');
   static const _envPort = String.fromEnvironment('CBLREP_API_PORT', defaultValue: '8000');
+
+  /// Human-readable reason a release build cannot reach the API, or `null`
+  /// when the build is correctly configured.
+  static String? get releaseConfigError =>
+      (_isReleaseBuild && _normalise(_envBaseUrl).isEmpty)
+          ? 'CBLREP_API_URL was not set at build time. Rebuild with '
+              '--dart-define=CBLREP_API_URL=https://your-api-host.com/api'
+          : null;
+
+  /// Strips trailing slashes and a trailing `/api` so the value can be used
+  /// as a clean origin regardless of how it was supplied.
+  static String _normalise(String raw) {
+    var value = raw.trim();
+    while (value.endsWith('/')) {
+      value = value.substring(0, value.length - 1);
+    }
+    if (value.endsWith('/api')) {
+      value = value.substring(0, value.length - 4);
+    }
+    return value;
+  }
 
   /// Candidate base URLs in probe order — the first one that answers a
   /// reachability probe wins and is pinned as the active base URL.
+  ///
+  /// Release: the single production host baked in at build time.
+  /// Debug/profile: production host (if given), else whichever of the LAN /
+  /// emulator / loopback addresses matches where the app is running:
+  ///
+  ///   Physical device  → http://<LAN-IP>:8000/api (phone + PC on same Wi-Fi)
+  ///   Android emulator → http://10.0.2.2:8000/api     (host loopback alias)
+  ///   iOS simulator    → http://127.0.0.1:8000/api    (shares the host network)
+  ///   adb reverse      → http://127.0.0.1:8000/api    (after `adb reverse`)
   static List<String> get baseUrlCandidates {
-    final port = _envPort;
-    final lanIp = _envLanIp.isEmpty ? null : 'http://$_envLanIp:$port/api';
-    if (_envBaseUrl.isNotEmpty) {
-      return [_envBaseUrl, if (lanIp != null && lanIp != _envBaseUrl) lanIp];
+    final production = _normalise(_envBaseUrl);
+    if (production.isNotEmpty) {
+      if (_isReleaseBuild) return ['$production/api'];
+      final lanIp = _devLanCandidate();
+      return ['$production/api', if (lanIp != null) lanIp, ..._devFallbacks()];
     }
-    if (Platform.isAndroid) {
-      return [
-        'http://10.0.2.2:$port/api', // Android emulator → host loopback
-        'http://127.0.0.1:$port/api', // physical device + adb reverse
-        ?lanIp, // phone + PC on the same Wi-Fi
-      ];
+
+    if (_isReleaseBuild) {
+      // Nothing configured: keep the list valid so Dio has a base URL, but it
+      // is unreachable by design. [releaseConfigError] explains why.
+      return ['https://api.invalid/api'];
     }
-    return [
-      'http://127.0.0.1:$port/api', // iOS simulator / desktop builds
-      'http://localhost:$port/api',
-      ?lanIp,
-    ];
+    return [?_devLanCandidate(), ..._devFallbacks()];
   }
+
+  static String? _devLanCandidate() =>
+      _envLanIp.isEmpty ? null : 'http://$_envLanIp:$_envPort/api';
+
+  static List<String> _devFallbacks() => Platform.isAndroid
+      ? [
+          // Android emulator → host loopback alias.
+          'http://10.0.2.2:$_envPort/api',
+          // Physical device over `adb reverse tcp:8000 tcp:8000`.
+          'http://127.0.0.1:$_envPort/api',
+        ]
+      : [
+          // iOS simulator / desktop share the host network.
+          'http://127.0.0.1:$_envPort/api',
+          'http://localhost:$_envPort/api',
+        ];
 
   static String get _preferredBaseUrl => baseUrlCandidates.first;
 
   final Dio _dio = Dio(BaseOptions(
     baseUrl: _preferredBaseUrl,
-    connectTimeout: const Duration(seconds: 10),
-    receiveTimeout: const Duration(seconds: 20),
+    // Tuned for a LAN-hosted backend: a reachable local host answers in
+    // milliseconds, so a long connect timeout only delays the error the member
+    // needs to see. Retries below still cover a briefly busy server.
+    connectTimeout: const Duration(seconds: 6),
+    receiveTimeout: const Duration(seconds: 15),
+    sendTimeout: const Duration(seconds: 15),
     headers: {'Accept': 'application/json'},
   ));
 
@@ -79,9 +135,34 @@ class ApiService {
   String _activeBaseUrl = _preferredBaseUrl;
   String get baseUrl => _activeBaseUrl;
 
+  /// Host:port of the active base URL — shown in network error messages so a
+  /// member knows exactly which server the app is trying to reach.
+  String get baseUrlHost {
+    final uri = Uri.tryParse(_activeBaseUrl);
+    if (uri == null || uri.host.isEmpty) return _activeBaseUrl;
+    final port = uri.hasPort ? ':${uri.port}' : '';
+    return '${uri.host}$port';
+  }
+
+  /// Fires once when the server rejects the stored token (401). [AuthProvider]
+  /// listens so an expired session bounces the member to Login instead of
+  /// leaving the dashboard on screen with every request doomed to fail.
+  final _sessionExpired = StreamController<void>.broadcast();
+
+  /// Emits when a 401 invalidates the session — never closed by the API layer.
+  Stream<void> get sessionExpired => _sessionExpired.stream;
+
   final _secure = const FlutterSecureStorage();
 
   Future<void> init() async {
+    // A release build shipped without CBLREP_API_URL can never reach the
+    // backend. Say so loudly once at startup instead of letting every screen
+    // show a generic network error.
+    final configError = releaseConfigError;
+    if (configError != null) {
+      debugPrint('[CBLREP] $configError');
+    }
+
     // Prefer the encrypted store; fall back to legacy SharedPreferences
     // token once, then migrate it into secure storage.
     String? token;
@@ -133,10 +214,18 @@ class ApiService {
         handler.next(options);
       },
       onError: (error, handler) {
-        if (error.response?.statusCode == 401) {
-          // Token expired/revoked — drop it so AuthGate returns to login.
+        final status = error.response?.statusCode;
+        // A login/register attempt answers 401 for bad credentials — that must
+        // surface on the login form, not trigger a global session-expiry.
+        final path = error.requestOptions.path;
+        final isAuthAttempt = path.endsWith('/login') || path.endsWith('/register');
+        if (status == 401 && !isAuthAttempt) {
+          // Token expired/revoked — drop it so AuthGate returns to login and
+          // tell the app layer, otherwise the member is left staring at a
+          // dashboard whose every request is about to fail.
           _dio.options.headers.remove('Authorization');
           unawaited(clearToken());
+          if (!_sessionExpired.isClosed) _sessionExpired.add(null);
         }
         handler.next(error);
       },
@@ -180,8 +269,14 @@ class ApiService {
     final original = error.requestOptions;
     final canReissue = original.data is! FormData;
 
+    // Hard ceiling on recovery work. Without it, a device that cannot reach
+    // the LAN host burns 6s connect + retries + probes on EVERY request, which
+    // reads to the member as a frozen app rather than a network error.
+    final deadline = DateTime.now().add(const Duration(seconds: 20));
+    bool timeLeft() => DateTime.now().isBefore(deadline);
+
     var delay = const Duration(milliseconds: 400);
-    for (var attempt = 0; attempt < 2 && canReissue; attempt++) {
+    for (var attempt = 0; attempt < 2 && canReissue && timeLeft(); attempt++) {
       await Future<void>.delayed(delay);
       delay = delay * 2;
       try {
@@ -192,15 +287,22 @@ class ApiService {
     }
 
     final working = await _probeCandidates(skip: _dio.options.baseUrl);
-    if (working == null) return null;
+    if (working == null || !timeLeft()) return null;
     try {
       return await _dio.fetch(original.copyWith(baseUrl: working));
     } on DioException catch (failoverError) {
       if (!_isConnectivityFailure(failoverError)) return null;
       // One more probe cycle before giving up (the winner may have dropped).
       final fallback = await _probeCandidates(skip: working);
-      if (fallback == null) return null;
-      return await _dio.fetch(original.copyWith(baseUrl: fallback));
+      if (fallback == null || !timeLeft()) return null;
+      // Guarded: an unguarded fetch here leaked a raw DioException past
+      // _request(), and every caller only catches ApiException — so one bad
+      // failover turned into an unhandled async error instead of a message.
+      try {
+        return await _dio.fetch(original.copyWith(baseUrl: fallback));
+      } on DioException {
+        return null;
+      }
     }
   }
 
@@ -234,8 +336,15 @@ class ApiService {
     return await _probeCandidates() != null;
   }
 
-  static const _connectivityHint =
-      "Can't reach the CBLREP server. Start the backend (php artisan serve in backend/) or check your connection, then tap retry.";
+  /// Names the host the app actually tried, so "can't reach the server" is
+  /// actionable instead of vague: the member sees whether they are pointed at
+  /// 192.168.1.81 (PC on the same Wi-Fi) or a deployed API.
+  String _connectivityHint() {
+    final host = baseUrlHost;
+    return "Unable to connect to the CBLREP server at $host. "
+        'Check that your phone is on the same Wi-Fi as that server and that the '
+        'backend is running, then retry.';
+  }
 
   ApiException _toApiException(DioException error) {
     final data = error.response?.data;
@@ -258,14 +367,16 @@ class ApiService {
     switch (error.type) {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.connectionError:
-        return const ApiException(_connectivityHint);
+        return ApiException(_connectivityHint());
       case DioExceptionType.receiveTimeout:
       case DioExceptionType.sendTimeout:
-        return const ApiException('The CBLREP server took too long to respond. Please try again.');
+        return ApiException('The CBLREP server at ${baseUrlHost} took too long to respond. Please retry.');
       case DioExceptionType.badCertificate:
         return const ApiException('The CBLREP server certificate could not be trusted.');
+      case DioExceptionType.cancel:
+        return const ApiException('The request was cancelled.');
       default:
-        return const ApiException('Unable to connect to the CBLREP server.');
+        return ApiException('Unable to connect to the CBLREP server at $baseUrlHost.');
     }
   }
 
@@ -281,12 +392,14 @@ class ApiService {
     required String fullName,
     required String email,
     required String barangay,
+    required String purokSitio,
     required String password,
   }) async {
     return Map<String, dynamic>.from(await _request(_dio.post('/register', data: {
       'fullName': fullName,
       'email': email,
       'barangay': barangay,
+      'purok_sitio': purokSitio,
       'password': password,
     })) as Map);
   }
@@ -365,9 +478,12 @@ class ApiService {
     required String type,
     required String description,
     required String category,
-    required String exchangeType,
     required String condition,
     required String location,
+    required String barangay,
+    required String purokSitio,
+    String compensationType = 'barter',
+    double? price,
     File? image,
   }) async {
     final payload = <String, dynamic>{
@@ -376,9 +492,14 @@ class ApiService {
       'listingType': type,
       'description': description,
       'category': category,
-      'exchangeType': exchangeType,
       'condition': condition,
       'location': location,
+      'barangay': barangay,
+      'purok_sitio': purokSitio,
+      // free | barter | paid — the flexible compensation model.
+      'compensation_type': compensationType,
+      // Only sent for a priced sale; free/barter never carry a figure.
+      if (compensationType == 'paid' && price != null) 'price': price,
     };
     if (image != null) {
       payload['image'] = await MultipartFile.fromFile(
@@ -411,6 +532,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> submitVerification({
     required String barangay,
+    required String purokSitio,
     required String documentType,
     required File document,
   }) async {
@@ -418,31 +540,68 @@ class ApiService {
       '/verification',
       data: FormData.fromMap({
         'barangay': barangay,
+        'purok_sitio': purokSitio,
         'document_type': documentType,
         'document': await MultipartFile.fromFile(document.path),
       }),
     )) as Map);
   }
 
-  // ── Exchanges (freecycle / barter / lending) ─────────────────────────
+  // ── Exchanges (direct bartering only) ────────────────────────────────
   Future<List<dynamic>> exchanges() async {
     final data = await _request(_dio.get('/exchanges')) as Map;
     final list = data['exchanges'] ?? data['data'] ?? const [];
     return List<dynamic>.from(list as List);
   }
 
+  /// POST /api/exchanges — propose a direct barter.
+  ///
+  /// `offeredItem` is the proposer's side of the trade and is what keeps every
+  /// proposal two-sided. `offeredResourceId` optionally names one
+  /// of the proposer's own listings instead of free text (skill-for-skill
+  /// trades just use the free-text field).
   Future<Map<String, dynamic>> createExchange({
     required int resourceId,
-    required String exchangeType,
-    String? returnDate,
-    double? credits,
+    String? offeredItem,
+    int? offeredResourceId,
+    required String barangay,
+    required String purokSitio,
   }) async =>
       Map<String, dynamic>.from(await _request(_dio.post('/exchanges', data: {
         'resource_id': resourceId,
-        'exchange_type': exchangeType,
-        if (returnDate != null) 'return_date': returnDate,
-        if (credits != null) 'credits_exchanged': credits,
+        if (offeredItem != null && offeredItem.trim().isNotEmpty) 'offered_item': offeredItem.trim(),
+        if (offeredResourceId != null) 'offered_resource_id': offeredResourceId,
+        'barangay': barangay,
+        'purok_sitio': purokSitio,
       })) as Map);
+
+  // ── Barter proposals ──────────────────────────────────────────
+  Future<Map<String, dynamic>> barterProposals() async {
+    return Map<String, dynamic>.from(await _request(_dio.get('/barter-proposals')) as Map);
+  }
+
+  Future<Map<String, dynamic>> createBarterProposal({
+    required int offeredItemId,
+    required int requestedItemId,
+  }) async {
+    try {
+      return Map<String, dynamic>.from(await _request(_dio.post('/barter-proposals', data: {
+        'offered_item_id': offeredItemId,
+        'requested_item_id': requestedItemId,
+      })) as Map);
+    } on DioException catch (e) {
+      throw ApiException(e.response?.data?['message']?.toString() ?? 'Could not send the barter proposal.', e.response?.statusCode);
+    }
+  }
+
+  Future<Map<String, dynamic>> updateBarterProposalStatus(int id, String status) async {
+    try {
+      return Map<String, dynamic>.from(await _request(
+          _dio.patch('/barter-proposals/$id/status', data: {'status': status})) as Map);
+    } on DioException catch (e) {
+      throw ApiException(e.response?.data?['message']?.toString() ?? 'Could not update the proposal.', e.response?.statusCode);
+    }
+  }
 
   Future<Map<String, dynamic>> updateExchange(int id, String status) async {
     try {
@@ -457,6 +616,16 @@ class ApiService {
     }
   }
 
+  /// POST /api/exchanges/{id}/confirm-completion — dual-confirmation.
+  ///
+  /// Records the caller's half of the completion (proposer OR owner).
+  /// The server promotes the exchange to `completed` only once BOTH
+  /// parties have confirmed; otherwise it returns the partial state with
+  /// "Waiting for other party's confirmation".
+  Future<Map<String, dynamic>> confirmExchangeCompletion(int id) async =>
+      Map<String, dynamic>.from(
+          await _request(_dio.post('/exchanges/$id/confirm-completion')) as Map);
+
   // ── Notifications (real-time alerts) ─────────────────────────────────
   Future<Map<String, dynamic>> notifications({int perPage = 25}) async =>
       Map<String, dynamic>.from(await _request(
@@ -466,67 +635,22 @@ class ApiService {
       Map<String, dynamic>.from(
           await _request(_dio.put('/notifications/$id/read')) as Map);
 
-  // ── Time Bank ────────────────────────────────────────────────────────
-  Future<Map<String, dynamic>> timeBankBalance() async =>
-      Map<String, dynamic>.from(await _request(_dio.get('/timebank/balance')) as Map);
-
-  Future<List<dynamic>> timeBankTransactions() async {
-    final data = await _request(_dio.get('/timebank/transactions')) as Map;
-    return List<dynamic>.from(data['transactions'] ?? data['data'] ?? const []);
-  }
-
-  Future<Map<String, dynamic>> timeBankStats() async {
-    try {
-      return Map<String, dynamic>.from(await _request(_dio.get('/timebank/stats')) as Map);
-    } on ApiException {
-      return const {};
-    }
-  }
-
-  Future<List<dynamic>> timeBankServices() async {
-    final data = await _request(_dio.get('/timebank/services')) as Map;
-    return List<dynamic>.from(data['services'] ?? const []);
-  }
-
-  /// POST /timebank/services — publish a skill/service you can offer to the
-  /// community, priced in time-bank hours.
-  Future<Map<String, dynamic>> offerTimeBankService({
-    required String title,
-    String? description,
-    String? category,
-    double? estimatedHours,
-    String? location,
-    String? availability,
-  }) async =>
-      Map<String, dynamic>.from(await _request(_dio.post('/timebank/services', data: {
-        'title': title.trim(),
-        if (description != null && description.trim().isNotEmpty) 'description': description.trim(),
-        if (category != null) 'category': category,
-        if (estimatedHours != null) 'estimated_hours': estimatedHours,
-        if (location != null && location.trim().isNotEmpty) 'location': location.trim(),
-        if (availability != null && availability.trim().isNotEmpty) 'availability': availability.trim(),
-      })) as Map);
-
-  /// POST /timebank/transactions — claim a listed service, spending/earning
-  /// time-bank credits once the provider completes and the member confirms.
-  Future<Map<String, dynamic>> requestTimeBankService({
-    required int serviceId,
-    double? hours,
-  }) async =>
-      Map<String, dynamic>.from(await _request(_dio.post('/timebank/transactions', data: {
-        'service_id': serviceId,
-        if (hours != null) 'requested_hours': hours,
-      })) as Map);
-
   // ── Conversations / secure in-app messaging ──────────────────────────
   Future<List<dynamic>> conversations() async {
     final data = await _request(_dio.get('/conversations')) as Map;
     return List<dynamic>.from(data['conversations'] ?? data['data'] ?? const []);
   }
 
-  Future<Map<String, dynamic>> startConversation(int userId) async =>
-      Map<String, dynamic>.from(
-          await _request(_dio.post('/conversations', data: {'user_id': userId})) as Map);
+  /// POST /conversations — open the direct-inquiry thread about a listing.
+  ///
+  /// Passing [listingId] scopes the conversation to the post (buyer + seller +
+  /// listing), so each listing gets its own thread. Omit it for a plain
+  /// person-to-person chat with [userId].
+  Future<Map<String, dynamic>> startConversation(int userId, {int? listingId}) async =>
+      Map<String, dynamic>.from(await _request(_dio.post('/conversations', data: {
+        'user_id': userId,
+        if (listingId != null) 'listing_id': listingId,
+      })) as Map);
 
   Future<Map<String, dynamic>> conversationMessages(int id) async =>
       Map<String, dynamic>.from(

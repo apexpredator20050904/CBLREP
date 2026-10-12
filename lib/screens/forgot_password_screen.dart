@@ -60,7 +60,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     final dark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       backgroundColor: dark ? CblrepColors.deepForest : null,
-      appBar: AppBar(title: const Text('Forgot password', style: TextStyle(fontSize: 16))),
+      appBar: AppBar(title: Text('Forgot password', style: TextStyle(fontSize: 16))),
       body: Form(
         key: formKey,
         child: ListView(
@@ -72,11 +72,11 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 6),
-            const Text(
+            Text(
               'Enter the e-mail address registered to your CBLREP account and we will '
               'send a 6-digit code to set a new password.',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: Colors.black54),
+              style: TextStyle(fontSize: 12, color: dark ? Colors.white70 : Colors.black54),
             ),
             const SizedBox(height: 24),
             TextFormField(

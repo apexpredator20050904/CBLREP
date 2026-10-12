@@ -1,30 +1,96 @@
+import '../core/api_service.dart';
+
+double? _asDouble(dynamic v) {
+  if (v == null) return null;
+  if (v is num) return v.toDouble();
+  if (v is String) return double.tryParse(v);
+  return null;
+}
+
+/// Rewrite the image URL's origin to the API host the app is actually
+/// talking to, so photos load no matter which base-URL candidate won
+/// (LAN IP, emulator alias, or adb reverse) and regardless of APP_URL.
+String? _resolveImageUrl(String? raw) {
+  if (raw == null || raw.isEmpty) return null;
+  final uri = Uri.tryParse(raw);
+  if (uri == null) return null;
+  if (raw.startsWith('/storage') || raw.startsWith('storage')) {
+    final host = ApiService.instance.baseUrl
+        .replaceFirst(RegExp(r'/api/?$'), '');
+    return '$host/${raw.startsWith('/') ? raw.substring(1) : raw}';
+  }
+  if (uri.hasScheme) {
+    try {
+      final apiBase = Uri.parse(ApiService.instance.baseUrl);
+      return uri.replace(scheme: apiBase.scheme, host: apiBase.host, port: apiBase.port).toString();
+    } catch (_) {
+      return raw;
+    }
+  }
+  return raw;
+}
+
 class UserModel {
   final int id;
   final String name;
   final String email;
   final String barangay;
+  final String purokSitio;
   final bool verified;
   final String verificationStatus;
-  final double credits;
+  final String? verificationNote;
 
   const UserModel({
     required this.id,
     required this.name,
     required this.email,
     required this.barangay,
+    required this.purokSitio,
     required this.verified,
     required this.verificationStatus,
-    required this.credits,
+    this.verificationNote,
   });
+
+  /// Normalises any server value — the raw `unverified`/`pending`/`verified`/
+  /// `rejected` status or the display label — to one canonical label.
+  static String labelForStatus(Object? raw) {
+    switch ('${raw ?? ''}'.toLowerCase()) {
+      case 'verified':
+        return 'Verified';
+      case 'pending':
+        return 'Pending';
+      case 'rejected':
+        return 'Rejected';
+      default:
+        return 'Unverified';
+    }
+  }
 
   factory UserModel.fromJson(Map<String, dynamic> json) => UserModel(
         id: (json['id'] as num?)?.toInt() ?? 0,
         name: (json['fullName'] ?? json['name'] ?? '') as String,
         email: (json['email'] ?? '') as String,
-        barangay: (json['barangay_or_location'] ?? json['barangay'] ?? '') as String,
+        barangay: (json['barangay'] ?? json['barangay_or_location'] ?? '') as String,
+        purokSitio: (json['purok_sitio'] ?? '') as String,
         verified: json['is_verified'] == true,
-        verificationStatus: (json['verification_status'] ?? 'Pending') as String,
-        credits: (json['time_bank_credits'] as num?)?.toDouble() ?? 0,
+        verificationStatus: labelForStatus(json['verification_status']),
+        verificationNote: json['verification_note'] as String?,
+      );
+
+  UserModel copyWith({
+    bool? verified,
+    String? verificationStatus,
+    String? verificationNote,
+  }) =>
+      UserModel(
+        id: id,
+        name: name,
+        email: email,
+        barangay: barangay,
+        purokSitio: purokSitio,
+        verified: verified ?? this.verified,
+        verificationStatus: verificationStatus ?? this.verificationStatus,
+        verificationNote: verificationNote ?? this.verificationNote,
       );
 }
 
@@ -33,47 +99,73 @@ class ListingModel {
   final String title;
   final String description;
   final String type;
+  final String compensationType;
+  final String compensationLabel;
+  final double? price;
   final String category;
-  final String exchangeType;
   final String condition;
   final String location;
+  final String barangay;
+  final String purokSitio;
   final String owner;
   final int ownerId;
   final String? imageUrl;
   final bool active;
+  final double? latitude;
+  final double? longitude;
 
   const ListingModel({
     required this.id,
     required this.title,
     required this.description,
     required this.type,
+    this.compensationType = 'barter',
+    this.compensationLabel = 'BARTER',
+    this.price,
     required this.category,
-    required this.exchangeType,
     required this.condition,
     required this.location,
+    required this.barangay,
+    required this.purokSitio,
     required this.owner,
     required this.ownerId,
     this.imageUrl,
     required this.active,
+    this.latitude,
+    this.longitude,
   });
+
+  bool get isFree => compensationType == 'free';
+  bool get isPaid => compensationType == 'paid';
+  bool get isBarter => !isFree && !isPaid;
 
   factory ListingModel.fromJson(Map<String, dynamic> json) {
     final owner = json['owner'];
+    final compensation = '${json['compensation_type'] ?? 'barter'}';
+    final label = json['compensation_label'] as String?;
     return ListingModel(
       id: (json['id'] as num?)?.toInt() ?? 0,
       title: (json['title'] ?? '') as String,
       description: (json['description'] ?? '') as String,
       type: (json['type'] ?? 'offer') as String,
+      compensationType: compensation,
+      compensationLabel: label ??
+          { 'free': 'FREE SHARING', 'paid': 'PAID' }[compensation] ??
+          'BARTER',
+      price: _asDouble(json['price']),
       category: (json['category'] ?? 'Tools') as String,
-      exchangeType: (json['exchange_type'] ?? json['exchangeType'] ?? 'Lend') as String,
       condition: (json['condition'] ?? 'Good') as String,
       location: (json['location'] ?? '') as String,
+      barangay: (json['barangay'] ?? '') as String,
+      purokSitio: (json['purok_sitio'] ?? '') as String,
       owner: owner is Map ? (owner['name'] ?? 'Member') as String : 'Member',
       ownerId: owner is Map
           ? (owner['id'] as num?)?.toInt() ?? (json['user_id'] as num?)?.toInt() ?? 0
           : (json['user_id'] as num?)?.toInt() ?? 0,
-      imageUrl: json['image_url'] as String?,
+      imageUrl: _resolveImageUrl(json['image_url'] as String?),
       active: json['is_active'] != false,
+      latitude: _asDouble(json['latitude']),
+      longitude: _asDouble(json['longitude']),
     );
   }
 }
@@ -81,18 +173,16 @@ class ListingModel {
 class ExchangeModel {
   final int id;
   final String title;
-  final String type;
   final String status;
-  final String? dueDate;
+  final String? offeredItem;
 
-  const ExchangeModel({required this.id, required this.title, required this.type, required this.status, this.dueDate});
+  const ExchangeModel({required this.id, required this.title, required this.status, this.offeredItem});
 
   factory ExchangeModel.fromJson(Map<String, dynamic> json) => ExchangeModel(
         id: (json['id'] as num?)?.toInt() ?? 0,
         title: (json['itemTitle'] ?? json['title'] ?? 'Exchange') as String,
-        type: (json['type'] ?? 'Lending') as String,
         status: (json['status'] ?? 'Pending') as String,
-        dueDate: json['dueDate'] as String?,
+        offeredItem: json['offeredItem'] as String?,
       );
 }
 
@@ -130,40 +220,42 @@ class ConversationModel {
   final int unreadCount;
   final DateTime? lastMessageAt;
 
+  /// Listing this inquiry is about (null for plain member-to-member chat).
+  final String? listingTitle;
+  final String? compensationType;
+  final String? compensationLabel;
+  final double? listingPrice;
+
   const ConversationModel({
     required this.id,
     required this.memberName,
     required this.memberEmail,
     required this.unreadCount,
     this.lastMessageAt,
+    this.listingTitle,
+    this.compensationType,
+    this.compensationLabel,
+    this.listingPrice,
   });
+
+  bool get hasListing => (listingTitle ?? '').isNotEmpty;
 
   factory ConversationModel.fromJson(Map<String, dynamic> json) {
     final member = json['member'] is Map ? Map<String, dynamic>.from(json['member'] as Map) : const {};
+    final listing = json['listing'] is Map ? Map<String, dynamic>.from(json['listing'] as Map) : null;
+    final rawPrice = listing?['price'];
     return ConversationModel(
       id: (json['id'] as num?)?.toInt() ?? 0,
       memberName: '${member['name'] ?? 'Member'}',
       memberEmail: '${member['email'] ?? ''}',
       unreadCount: (json['unread_count'] as num?)?.toInt() ?? 0,
       lastMessageAt: DateTime.tryParse('${json['last_message_at'] ?? ''}'),
+      listingTitle: listing == null ? null : '${listing['title'] ?? ''}',
+      compensationType: listing == null ? null : '${listing['compensation_type'] ?? 'barter'}',
+      compensationLabel: listing == null ? null : '${listing['compensation_label'] ?? 'BARTER'}',
+      listingPrice: listing == null ? null : _asDouble(rawPrice),
     );
   }
-}
-
-class TimeBankModel {
-  final double balance;
-  final double earned;
-  final double spent;
-  final double pending;
-
-  const TimeBankModel({required this.balance, required this.earned, required this.spent, required this.pending});
-
-  factory TimeBankModel.fromJson(Map<String, dynamic> json) => TimeBankModel(
-        balance: (json['balance'] as num?)?.toDouble() ?? 0,
-        earned: (json['earned'] as num?)?.toDouble() ?? 0,
-        spent: (json['spent'] as num?)?.toDouble() ?? 0,
-        pending: (json['pending'] as num?)?.toDouble() ?? 0,
-      );
 }
 
 class ChatMessageModel {

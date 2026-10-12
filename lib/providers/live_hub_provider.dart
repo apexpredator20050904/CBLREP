@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../core/api_service.dart';
 
-/// Single live-data hub for exchanges, notifications, time-bank,
+/// Single live-data hub for exchanges, notifications,
 /// conversations and dashboard stats. Every stream polls on a timer so
 /// lists update without manual refresh, and exposes `refreshAll()`.
 class LiveHubProvider extends ChangeNotifier {
@@ -11,11 +11,10 @@ class LiveHubProvider extends ChangeNotifier {
   LiveHubProvider(this.api);
 
   List<dynamic> exchanges = const [];
+  List<dynamic> barterProposalsIncoming = const [];
+  List<dynamic> barterProposalsOutgoing = const [];
   List<dynamic> notifications = const [];
   int unreadCount = 0;
-  Map<String, dynamic>? timeBank;
-  List<dynamic> timeBankTxns = const [];
-  List<dynamic> timeBankServices = const [];
   List<dynamic> conversations = const [];
   Map<String, dynamic>? dashboard;
   String? error;
@@ -34,6 +33,13 @@ class LiveHubProvider extends ChangeNotifier {
       error = null;
     } on ApiException catch (e) {
       error = e.message;
+    } catch (unexpected) {
+      // catchError() inside refreshAll() only covers the awaited API calls;
+      // anything raised by the shaping code below used to escape as an
+      // unhandled async error from a Timer callback, silently killing the
+      // live poll for the rest of the session.
+      debugPrint('[CBLREP] live hub refresh failed: $unexpected');
+      error = 'Live updates paused. Pull to refresh.';
     } finally {
       _fetching = false;
       // The 20s poll usually returns identical data — skip the notify so the
@@ -45,12 +51,13 @@ class LiveHubProvider extends ChangeNotifier {
   /// Cheap fingerprint of everything the UI renders from this provider.
   String get _fingerprint => [
         exchanges.length,
+        barterProposalsIncoming.length + barterProposalsOutgoing.length,
+        [...barterProposalsIncoming, ...barterProposalsOutgoing]
+            .map((p) => '${(p as Map)['id']}:${(p as Map)['status']}')
+            .join(','),
         notifications.length,
         unreadCount,
-        timeBankTxns.length,
         conversations.length,
-        timeBankServices.length,
-        timeBank?.values.join('|'),
         dashboard?.values.join('|'),
       ].join('§');
 
@@ -58,24 +65,22 @@ class LiveHubProvider extends ChangeNotifier {
         final results = await Future.wait([
           api.exchanges().catchError((_) => <dynamic>[]),
           api.notifications().catchError((_) => <String, dynamic>{}),
-          api.timeBankBalance().catchError((_) => <String, dynamic>{}),
-          api.timeBankTransactions().catchError((_) => <dynamic>[]),
           api.conversations().catchError((_) => <dynamic>[]),
           api.dashboardStats().catchError((_) => <String, dynamic>{}),
-          api.timeBankServices().catchError((_) => <dynamic>[]),
+          api.barterProposals().catchError((_) => <String, dynamic>{}),
         ]);
         exchanges = (results[0] as List).toList();
         final notif = Map<String, dynamic>.from(results[1] as Map);
         notifications = List<dynamic>.from(notif['notifications'] ?? const []);
         unreadCount = (notif['unread_count'] as num?)?.toInt() ?? 0;
-        timeBank = Map<String, dynamic>.from(results[2] as Map);
-        timeBankTxns = (results[3] as List).toList();
-        conversations = (results[4] as List).toList();
-        dashboard = Map<String, dynamic>.from(results[5] as Map);
-        timeBankServices = (results[6] as List).toList();
+        conversations = (results[2] as List).toList();
+        dashboard = Map<String, dynamic>.from(results[3] as Map);
+        final barter = Map<String, dynamic>.from(results[4] as Map);
+        barterProposalsIncoming = List<dynamic>.from(barter['incoming'] ?? const []);
+        barterProposalsOutgoing = List<dynamic>.from(barter['outgoing'] ?? const []);
       });
 
-  void startLive({Duration interval = const Duration(seconds: 20)}) {
+  void startLive({Duration interval = const Duration(seconds: 10)}) {
     stopLive();
     unawaited(refreshAll());
     _timer = Timer.periodic(interval, (_) => refreshAll());
@@ -88,33 +93,6 @@ class LiveHubProvider extends ChangeNotifier {
 
   Future<void> markNotificationRead(int id) async {
     await api.markNotificationRead(id);
-    await refreshAll();
-  }
-
-  /// Claim a listed time-bank service. Refreshing straight away keeps the
-  /// credit balance and the transaction ledger in sync.
-  Future<void> requestService(int serviceId, {double? hours}) async {
-    await api.requestTimeBankService(serviceId: serviceId, hours: hours);
-    await refreshAll();
-  }
-
-  /// Publish a service the signed-in member can offer to neighbours.
-  Future<void> offerService({
-    required String title,
-    String? description,
-    String? category,
-    double? estimatedHours,
-    String? location,
-    String? availability,
-  }) async {
-    await api.offerTimeBankService(
-      title: title,
-      description: description,
-      category: category,
-      estimatedHours: estimatedHours,
-      location: location,
-      availability: availability,
-    );
     await refreshAll();
   }
 

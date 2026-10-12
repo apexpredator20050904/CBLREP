@@ -11,7 +11,17 @@ import '../theme/cblrep_theme.dart';
 class ChatScreen extends StatefulWidget {
   final int conversationId;
   final String title;
-  const ChatScreen({super.key, required this.conversationId, required this.title});
+
+  /// Optional opening message pre-filled into the composer (not auto-sent) so
+  /// a member can start a listing negotiation in one tap and then edit it.
+  final String? initialDraft;
+
+  const ChatScreen({
+    super.key,
+    required this.conversationId,
+    required this.title,
+    this.initialDraft,
+  });
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
@@ -25,6 +35,11 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    // Seed the composer with a tailored opener when one was supplied.
+    if (widget.initialDraft != null && widget.initialDraft!.trim().isNotEmpty) {
+      input.text = widget.initialDraft!.trim();
+      input.selection = TextSelection.fromPosition(TextPosition(offset: input.text.length));
+    }
     Future.microtask(() {
       if (!mounted) return;
       context.read<ChatProvider>().bindSelf(
@@ -103,11 +118,11 @@ class _ChatScreenState extends State<ChatScreen> {
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                             constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
                             decoration: BoxDecoration(
-                              color: mine ? CblrepColors.actionOrange : (dark ? CblrepColors.cardGrey : Colors.white),
+                              color: mine ? CblrepColors.actionOrange : (dark ? CblrepColors.darkCardGreen : Colors.white),
                               borderRadius: BorderRadius.circular(14),
                             ),
                             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              if (!mine) Text(m.sender, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black54)),
+                              if (!mine) Text(m.sender, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: dark ? Colors.white70 : Colors.black54)),
                               Text(m.body, style: TextStyle(fontSize: 13, color: mine ? Colors.white : Colors.black87)),
                             ]),
                           ),
