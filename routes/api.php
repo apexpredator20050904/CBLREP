@@ -7,14 +7,13 @@ use App\Http\Controllers\Api\AdminTwoFactorController;
 use App\Http\Controllers\Api\AdminUserController;
 use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\BarterProposalController;
 use App\Http\Controllers\Api\ContentAdminController;
 use App\Http\Controllers\Api\ConversationController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\ExchangeController;
-use App\Http\Controllers\Api\BarterProposalController;
 use App\Http\Controllers\Api\ListingController;
 use App\Http\Controllers\Api\NotificationController;
-use App\Http\Controllers\Api\RealtimeController;
 use App\Http\Controllers\Api\VerificationReportsController;
 use Illuminate\Support\Facades\Route;
 
@@ -23,7 +22,7 @@ use Illuminate\Support\Facades\Route;
 | Public endpoints
 |--------------------------------------------------------------------------
 | Reachable without a token: auth entry points, read-only catalogues used
-| by the mobile browse/map screens, and the realtime chat store.
+| by the mobile browse/map screens.
 */
 
 // Auth entry points. Each uses a named limiter from AppServiceProvider so
@@ -80,10 +79,20 @@ Route::post('/forgot-password', [AuthController::class, 'forgotPassword'])->midd
 Route::post('/reset-password', [AuthController::class, 'resetPassword'])->middleware('throttle:password-reset');
 Route::get('/platform/status', [AdminPortalController::class, 'platformStatus']);
 
-Route::get('/listings', [ListingController::class, 'index']);
+// Public browse feed, used by the mobile home feed and the landing map.
+// Throttled because it is unauthenticated and, before pagination was added,
+// returned every active listing on each hit.
+Route::get('/listings', [ListingController::class, 'index'])->middleware('throttle:public-read');
 
-Route::get('/presence', [RealtimeController::class, 'presenceIndex']);
-Route::post('/presence', [RealtimeController::class, 'presenceStore']);
+/*
+|--------------------------------------------------------------------------
+| Realtime presence
+|--------------------------------------------------------------------------
+| REMOVED. `/presence` was a JSON-file-backed presence/message store that no
+| client called — Flutter and React both use the Sanctum conversation APIs
+| instead. It accepted an unvalidated request body, had no throttle, and grew
+| a single JSON file without bound. Routes and controller deleted together.
+*/
 
 /*
 |--------------------------------------------------------------------------
@@ -133,7 +142,7 @@ Route::middleware('auth:sanctum')->group(function () {
      * Admin portal — endpoints consumed by frontend/src/admin pages.
      * Every handler re-checks the admin role (AdminPortalController::guard).
      */
-        Route::prefix('admin')->middleware('admin')->group(function () {
+    Route::prefix('admin')->middleware('admin')->group(function () {
         Route::get('/dashboard', [AdminController::class, 'dashboard']);
         Route::get('/users', [AdminPortalController::class, 'users']);
         Route::post('/users/{id}/{action}', [AdminPortalController::class, 'userAction']);

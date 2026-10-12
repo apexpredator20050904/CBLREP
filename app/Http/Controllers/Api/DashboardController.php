@@ -29,9 +29,16 @@ class DashboardController extends Controller
             ];
         });
 
+        // The `resources` mirror used to load EVERY active listing on each
+        // call. The mobile LiveHubProvider polls this endpoint every 10
+        // seconds, so that turned one background tick into a full-table read
+        // and hydrate of every row. Capped to the same recent window the
+        // summary cards already show; clients wanting the full feed should
+        // call GET /listings, which is now paginated.
         $listings = Resource::with(['user', 'category'])
             ->where('is_active', true)
             ->latest()
+            ->take(10)
             ->get()
             ->map(fn (Resource $resource) => $resource->toFrontendListing())
             ->values();

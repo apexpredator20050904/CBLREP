@@ -10,6 +10,13 @@ use Illuminate\Support\Facades\Storage;
 
 class ListingController extends Controller
 {
+    /// Public browse feed.
+    ///
+    /// Paginated with a bounded default: this endpoint is unauthenticated and
+    /// the mobile client polls it, so returning every active listing on each
+    /// request was both a scaling risk and an easy abuse target. Clients
+    /// transparently ignore `meta` and keep reading `listings`, so the wire
+    /// contract is unchanged for existing builds.
     public function index(Request $request)
     {
         $query = Resource::with(['user', 'category'])
@@ -20,6 +27,9 @@ class ListingController extends Controller
             $query->where('barangay', $barangay);
         }
         if ($q = trim((string) $request->query('q', ''))) {
+            // Length-capped: an unbounded search term is a wider full scan and
+            // the field is a LIKE across several columns either way.
+            $q = mb_substr($q, 0, 80);
             $query->where(fn ($w) => $w
                 ->where('title', 'like', "%{$q}%")
                 ->orWhere('description', 'like', "%{$q}%")
@@ -27,13 +37,25 @@ class ListingController extends Controller
                 ->orWhere('purok_sitio', 'like', "%{$q}%"));
         }
 
-        $listings = $query->get()
+        $perPage = min(max((int) $request->query('per_page', 30), 1), 100);
+        $paginator = $query->paginate($perPage)->withQueryString();
+
+        $listings = $paginator->getCollection()
             ->map(fn (Resource $resource) => $resource->toFrontendListing())
             ->values();
 
         return response()->json([
             'listings' => $listings,
+            // `data` is a legacy alias kept so older mobile builds that read
+            // this key keep working against a paginated response.
             'data' => $listings,
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'has_more' => $paginator->hasMorePages(),
+            ],
         ]);
     }
 
@@ -114,14 +136,23 @@ class ListingController extends Controller
             'location' => 'nullable|string|max:255',
             'barangay' => ['sometimes', 'string', \App\Support\Barangays::rule()],
             'purok_sitio' => ['sometimes', 'nullable', 'string', 'max:60', \App\Support\Puroks::rule()],
-            'status' => 'sometimes|in:active,closed',
+            // A member may only CLOSE their own listing. `active` is
+            // deliberately rejected: re-opening is an admin decision
+            // (AdminPortalController::moderateResource), otherwise an owner
+            // could PATCH {status:"active"} and undo a flagged/removed
+            // moderation action on their own listing.
+            'status' => 'sometimes|in:closed',
             'image' => 'nullable|image|mimes:jpg,jpeg,png|max:5120',
         ]);
         if ($request->hasFile('image')) {
             if ($resource->image_path) Storage::disk('public')->delete($resource->image_path);
             $resource->image_path = $request->file('image')->store('listing-images', 'public');
         }
-        $resource->fill(collect($validated)->except(['category', 'image', 'compensation_type', 'price'])->all());
+        // `status` is excluded from mass-assignment for the same reason: it is
+        // applied explicitly below under the closed-only rule above.
+        $resource->fill(collect($validated)
+            ->except(['category', 'image', 'compensation_type', 'price', 'status'])
+            ->all());
         if (array_key_exists('category', $validated)) {
             $resource->category_id = Category::findOrCreateByName($validated['category'] ?: 'Tools')->id;
         }
@@ -146,7 +177,13 @@ class ListingController extends Controller
         } elseif ($resource->compensationType() !== Resource::PAID) {
             $resource->price = null;
         }
-        $resource->is_active = ($validated['status'] ?? $resource->status) === 'active';
+        // Only an explicit {status:"closed"} deactivates a listing. Absent
+        // that, the current visibility is preserved — so editing the title of
+        // a flagged listing does not silently re-activate or close it.
+        if (array_key_exists('status', $validated)) {
+            $resource->status = 'closed';
+            $resource->is_active = false;
+        }
         $resource->save();
         return response()->json(['message' => 'Listing updated.', 'data' => $resource->fresh(['user', 'category'])->toFrontendListing()]);
     }

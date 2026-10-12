@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Local test configuration.
+
+    The committed phpunit.xml.dist defaults to an in-memory SQLite database,
+    but this project targets MariaDB/MySQL and one migration deliberately
+    uses MariaDB-specific DDL (a STORED generated column plus a plain unique
+    index, because functional-key indexes are unavailable). Running the
+    suite against SQLite therefore fails before the first test.
+
+    This file points the suite at a dedicated *_test database on the same
+    engine as production, which is both runnable here and a truer test of
+    the schema. phpunit.xml.dist stays untouched so a fresh clone with
+    pdo_sqlite installed still gets the stock behaviour.
+
+    Create the database once:
+      CREATE DATABASE `community-based-portal_test`
+        CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+      GRANT ALL PRIVILEGES ON `community-based-portal_test`.* TO 'cblrep'@'localhost';
+-->
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/11.0/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true">
+    <testsuites>
+        <testsuite name="Unit">
+            <directory suffix="Test.php">tests/Unit</directory>
+        </testsuite>
+        <testsuite name="Feature">
+            <directory suffix="Test.php">tests/Feature</directory>
+        </testsuite>
+    </testsuites>
+    <source>
+        <include>
+            <directory suffix=".php">app</directory>
+        </include>
+    </source>
+    <php>
+        <env name="APP_ENV" value="testing"/>
+        <env name="APP_DEBUG" value="false"/>
+        <env name="CACHE_STORE" value="array"/>
+        <env name="DB_CONNECTION" value="mysql"/>
+        <env name="DB_HOST" value="127.0.0.1"/>
+        <env name="DB_PORT" value="3306"/>
+        <env name="DB_DATABASE" value="community-based-portal_test"/>
+        <env name="DB_USERNAME" value="cblrep"/>
+        <env name="DB_PASSWORD" value="cblrep_dev_2026"/>
+        <env name="MAIL_MAILER" value="array"/>
+        <env name="QUEUE_CONNECTION" value="sync"/>
+        <env name="SESSION_DRIVER" value="array"/>
+        <env name="FILESYSTEM_DISK" value="array"/>
+    </php>
+</phpunit>

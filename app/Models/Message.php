@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * Persistent message records (totals for admin reports). Live chat delivery
- * itself lives in storage/app/realtime.json — see RealtimeController.
+ * itself lives in the `messages` table — see ConversationController.
  */
 class Message extends Model
 {

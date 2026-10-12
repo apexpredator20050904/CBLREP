@@ -14,7 +14,7 @@ use Illuminate\Support\Str;
  *
  * Reports originate from members flagging listings: every resource whose
  * status is "flagged" appears as a PENDING report. Decisions are persisted
- * to storage/app/reports.json (same pattern as realtime.json) and mirrored
+ * to storage/app/reports.json and mirrored
  * into system_logs for the audit trail.
  */
 class VerificationReportsController extends Controller
