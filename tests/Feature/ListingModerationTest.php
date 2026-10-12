@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Models\Category;
 use App\Models\Resource;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
@@ -21,8 +20,6 @@ use Tests\TestCase;
  */
 class ListingModerationTest extends TestCase
 {
-    use RefreshDatabase;
-
     private function member(): User
     {
         return User::create([

@@ -2,21 +2,40 @@
 <!--
     Local test configuration.
 
-    The committed phpunit.xml.dist defaults to an in-memory SQLite database,
-    but this project targets MariaDB/MySQL and one migration deliberately
-    uses MariaDB-specific DDL (a STORED generated column plus a plain unique
-    index, because functional-key indexes are unavailable). Running the
-    suite against SQLite therefore fails before the first test.
+    WHY THIS OVERRIDES phpunit.xml.dist
+    ====================================
 
-    This file points the suite at a dedicated *_test database on the same
-    engine as production, which is both runnable here and a truer test of
-    the schema. phpunit.xml.dist stays untouched so a fresh clone with
-    pdo_sqlite installed still gets the stock behaviour.
+    The committed dist file defaults to in-memory SQLite, but:
 
-    Create the database once:
-      CREATE DATABASE `community-based-portal_test`
-        CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-      GRANT ALL PRIVILEGES ON `community-based-portal_test`.* TO 'cblrep'@'localhost';
+      1. pdo_sqlite is not installed on this machine (no pdo_sqlite.so on
+         disk), so that connection cannot connect at all.
+      2. Migration 2026_10_04_000002 uses MariaDB-specific DDL: a STORED
+         generated column plus a plain unique index, because MariaDB has no
+         functional-key index. SQLite cannot execute it.
+
+    The suite therefore runs against the development MariaDB database.
+
+    SAFETY: READ BEFORE EDITING
+    ===========================
+
+    These tests use DatabaseTransactions, NOT RefreshDatabase.
+
+    Laravel's `migrate:fresh` (which RefreshDatabase triggers) calls
+    MySqlBuilder::dropAllTables(), which lists every table in the schema with
+    no table-prefix exemption. Pointed at the development database it would
+    DROP the development rows as well. DatabaseTransactions wraps each test in
+    a transaction and rolls it back, leaving the schema and all existing rows
+    untouched.
+
+    Switching these tests to RefreshDatabase will wipe the local database. Use a
+    dedicated test schema first if you need RefreshDatabase semantics.
+
+    The schema must be current before running the suite:
+        php artisan migrate
+
+    Tests skip (rather than fail) when the configured database is unreachable,
+    so a typo in these credentials surfaces as a clear message rather than a
+    connection stack trace.
 -->
 <phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/11.0/phpunit.xsd"
@@ -42,7 +61,7 @@
         <env name="DB_CONNECTION" value="mysql"/>
         <env name="DB_HOST" value="127.0.0.1"/>
         <env name="DB_PORT" value="3306"/>
-        <env name="DB_DATABASE" value="community-based-portal_test"/>
+        <env name="DB_DATABASE" value="community-based-portal"/>
         <env name="DB_USERNAME" value="cblrep"/>
         <env name="DB_PASSWORD" value="cblrep_dev_2026"/>
         <env name="MAIL_MAILER" value="array"/>

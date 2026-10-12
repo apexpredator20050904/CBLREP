@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Models\User;
 use App\Support\Barangays;
 use App\Support\Puroks;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
@@ -17,8 +16,6 @@ use Tests\TestCase;
  */
 class BarangayValidationTest extends TestCase
 {
-    use RefreshDatabase;
-
     /** Every official barangay, asserted against the single source of truth. */
     public function test_the_registry_holds_exactly_twenty_official_barangays(): void
     {

@@ -6,7 +6,6 @@ use App\Models\Category;
 use App\Models\Conversation;
 use App\Models\Resource;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
@@ -18,8 +17,6 @@ use Tests\TestCase;
  */
 class ConversationAccessTest extends TestCase
 {
-    use RefreshDatabase;
-
     private function user(string $name, string $email): User
     {
         return User::create([
