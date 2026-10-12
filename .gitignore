@@ -1,0 +1,28 @@
+# Local environment — contains DB credentials. Never commit.
+/.env
+/.env.backup
+/.env.production
+
+# Composer / npm dependencies are reproducible from composer.lock.
+/vendor/
+/node_modules/
+
+# Runtime caches and generated state.
+/bootstrap/cache/*.php
+!/bootstrap/cache/.gitignore
+/storage/framework/cache/*
+!/storage/framework/cache/.gitignore
+/storage/framework/sessions/*
+!/storage/framework/sessions/.gitignore
+/storage/framework/views/*
+!/storage/framework/views/.gitignore
+/storage/logs/*
+!/storage/logs/.gitignore
+/storage/app/*.json
+# Uploaded listing photos are user content, not source. They live on the
+# `public` disk and are served via public/storage.
+#/storage/app/public/listing-images/
+
+# Local tooling
+/.phpunit.result.cache
+/.php-cs-fixer.cache

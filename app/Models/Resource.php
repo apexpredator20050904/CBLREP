@@ -9,15 +9,40 @@ use Illuminate\Database\Eloquent\Model;
  */
 class Resource extends Model
 {
+    /**
+     * The three community-sharing modes a listing can declare.
+     *
+     *   FREE   — a gift to a neighbour; never carries a price.
+     *   BARTER — an item/skill swap; negotiated directly, no price.
+     *   PAID   — a priced sale; always carries a price.
+     */
+    public const FREE = 'free';
+    public const BARTER = 'barter';
+    public const PAID = 'paid';
+
+    public const COMPENSATIONS = [self::FREE, self::BARTER, self::PAID];
+
+    /** Human labels shown on badges in the admin console and mobile app. */
+    public const COMPENSATION_LABELS = [
+        self::FREE => 'FREE SHARING',
+        self::BARTER => 'BARTER',
+        self::PAID => 'PAID',
+    ];
+
     protected $fillable = [
         'user_id',
         'category_id',
         'type',
-        'exchange_type',
+        'compensation_type',
+        'price',
         'condition',
         'title',
         'description',
         'location',
+        'barangay',
+        'purok_sitio',
+        'latitude',
+        'longitude',
         'is_active',
         'status',
         'image_path',
@@ -25,7 +50,33 @@ class Resource extends Model
 
     protected $casts = [
         'is_active' => 'boolean',
+        'price' => 'float',
     ];
+
+    /** Canonical compensation key, defaulting legacy rows to barter. */
+    public function compensationType(): string
+    {
+        $type = $this->compensation_type;
+
+        return in_array($type, self::COMPENSATIONS, true) ? $type : self::BARTER;
+    }
+
+    /** Badge text, e.g. "FREE SHARING". */
+    public function compensationLabel(): string
+    {
+        return self::COMPENSATION_LABELS[$this->compensationType()] ?? 'BARTER';
+    }
+
+    /**
+     * Price is meaningful only for a paid listing — free/barter always report
+     * null so the UI never shows a stale figure on a non-sale.
+     */
+    public function displayPrice(): ?float
+    {
+        return $this->compensationType() === self::PAID && $this->price !== null
+            ? (float) $this->price
+            : null;
+    }
 
     // ------------------------------------------------------------------
     // Relations
@@ -59,9 +110,15 @@ class Resource extends Model
             'category' => $this->category?->name ?? 'Tools',
             'category_id' => $this->category_id,
             'type' => $this->type ?? 'offer',
-            'exchange_type' => $this->exchange_type ?? 'Lend',
+            'compensation_type' => $this->compensationType(),
+            'compensation_label' => $this->compensationLabel(),
+            'price' => $this->displayPrice(),
             'condition' => $this->condition ?? 'Good',
             'location' => $this->location ?? '',
+            'barangay' => $this->barangay,
+            'purok_sitio' => $this->purok_sitio,
+            'latitude' => $this->latitude ?? \App\Support\BarangayLocations::for($this->location)[0],
+            'longitude' => $this->longitude ?? \App\Support\BarangayLocations::for($this->location)[1],
             'status' => $this->status ?? 'active',
             'is_active' => (bool) $this->is_active,
             'owner' => [

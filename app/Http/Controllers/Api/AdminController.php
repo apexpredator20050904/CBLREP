@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\Exchange;
 use App\Models\Resource;
-use App\Models\TimebankTransaction;
 use App\Models\User;
 use Illuminate\Http\Request;
 
@@ -21,7 +20,7 @@ class AdminController extends Controller
 {
     public function dashboard(Request $request)
     {
-        if ($request->user()->role !== 'admin') {
+        if (! $request->user()->isAdmin()) {
             return response()->json(['message' => 'Unauthorized. Admin access required.'], 403);
         }
 
@@ -60,7 +59,6 @@ class AdminController extends Controller
                 ->count(),
             'totalExchanges' => Exchange::count(),
             'completedExchanges' => Exchange::where('status', 'completed')->count(),
-            'totalTimeBankTransactions' => TimebankTransaction::count(),
             'pendingReports' => Resource::where('status', 'flagged')->count(),
             'openFlaggedContent' => Resource::where('status', 'flagged')->count(),
             'verifiedUsersCount' => $verifiedUsersCount,
@@ -71,7 +69,6 @@ class AdminController extends Controller
             'pendingVerificationPercent' => $totalUsers > 0
                 ? round(($pendingVerificationCount / $totalUsers) * 100).'%'
                 : '0%',
-            'timeBankHoursTotal' => round((float) User::sum('time_bank_credits'), 1).' hrs',
             'recentActions' => $recentActions->values(),
         ]);
     }

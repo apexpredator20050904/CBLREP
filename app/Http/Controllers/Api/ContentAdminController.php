@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Announcement;
 use App\Models\AuditLog;
 use App\Models\ContentPage;
+use App\Models\MemberNotification;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
@@ -18,7 +20,7 @@ class ContentAdminController extends Controller
 {
     private function guard(Request $request): void
     {
-        abort_unless($request->user()?->role === 'admin', 403, 'Unauthorized. Admin access required.');
+        abort_unless($request->user()?->isAdmin(), 403, 'Unauthorized. Admin access required.');
     }
 
     private function log(Request $request, string $action, ?string $t, ?int $id, ?string $d = null): void
@@ -144,7 +146,7 @@ class ContentAdminController extends Controller
             'title' => ['required', 'string', 'max:255'],
             'body' => ['required', 'string'],
             'audience' => ['required', 'in:all,verified,barangay,admins'],
-            'barangay' => ['nullable', 'string', 'max:100', 'required_if:audience,barangay'],
+            'barangay' => ['nullable', 'string', 'max:100', \App\Support\Barangays::rule(), 'required_if:audience,barangay'],
             'status' => ['nullable', 'in:draft,scheduled,sent'],
             'scheduled_at' => ['nullable', 'date', 'required_if:status,scheduled'],
         ]);
@@ -155,6 +157,9 @@ class ContentAdminController extends Controller
             'status' => $status, 'scheduled_at' => $status === 'scheduled' ? $v['scheduled_at'] : null,
             'sent_at' => $status === 'sent' ? now() : null, 'created_by' => $request->user()->id,
         ]);
+        if ($status === 'sent') {
+            $this->broadcastAnnouncement($item);
+        }
         $this->log($request, "Created announcement \"{$item->title}\" ({$item->status})", 'announcement', $item->id);
         return response()->json(['message' => 'Announcement saved.', 'announcement' => $item], 201);
     }
@@ -164,8 +169,34 @@ class ContentAdminController extends Controller
         $this->guard($request);
         $item = Announcement::findOrFail($id);
         $item->update(['status' => 'sent', 'sent_at' => now(), 'scheduled_at' => null]);
+        $this->broadcastAnnouncement($item);
         $this->log($request, "Sent announcement \"{$item->title}\"", 'announcement', $item->id);
         return response()->json(['message' => 'Announcement sent.', 'announcement' => $item->fresh()]);
+    }
+
+    private function broadcastAnnouncement(Announcement $item): void
+    {
+        $recipients = User::query()->where(function ($query) use ($item) {
+            if ($item->audience === 'verified') {
+                $query->where('is_verified', true);
+            } elseif ($item->audience === 'barangay') {
+                $query->where('is_verified', true)->where('barangay_or_location', $item->barangay);
+            } elseif ($item->audience === 'admins') {
+                $query->where('role', 'admin');
+            } else {
+                $query->whereIn('role', ['user', 'admin']);
+            }
+        })->pluck('id');
+        foreach ($recipients as $userId) {
+            MemberNotification::firstOrCreate([
+                'user_id' => $userId,
+                'announcement_id' => $item->id,
+            ], [
+                'type' => 'announcement',
+                'title' => $item->title,
+                'body' => $item->body,
+            ]);
+        }
     }
 
     public function notifDestroy(Request $request, $id)

@@ -70,7 +70,7 @@ class VerificationReportsController extends Controller
 
     public function index(Request $request)
     {
-        abort_unless($request->user()->role === 'admin', 403, 'Unauthorized. Admin access required.');
+        abort_unless($request->user()->isAdmin(), 403, 'Unauthorized. Admin access required.');
 
         $status = strtoupper($request->query('status', 'all'));
 
@@ -88,7 +88,7 @@ class VerificationReportsController extends Controller
 
     public function resolve(Request $request, $id)
     {
-        abort_unless($request->user()->role === 'admin', 403, 'Unauthorized. Admin access required.');
+        abort_unless($request->user()->isAdmin(), 403, 'Unauthorized. Admin access required.');
 
         $validated = $request->validate([
             'decision' => ['required', 'in:UNDER REVIEW,RESOLVED,DISMISSED'],

@@ -5,12 +5,15 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\AdminSetting;
 use App\Models\AuditLog;
+use App\Models\Conversation;
 use App\Models\Exchange;
+use App\Models\Message;
 use App\Models\Resource;
-use App\Models\TimebankTransaction;
 use App\Models\User;
+use App\Models\VerificationHistory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -21,7 +24,7 @@ class AdminPortalController extends Controller
 {
     private function guard(Request $request): void
     {
-        abort_unless($request->user()?->role === 'admin', 403, 'Unauthorized. Admin access required.');
+        abort_unless($request->user()?->isAdmin(), 403, 'Unauthorized. Admin access required.');
     }
 
     /**
@@ -93,7 +96,6 @@ class AdminPortalController extends Controller
             'is_verified' => (bool) $u->is_verified,
             'is_student' => (bool) $u->student_status,
             'student_school' => $u->student_school,
-            'time_bank_credits' => (float) $u->time_bank_credits,
             'barangay_or_location' => $u->barangay_or_location,
             'resources_count' => $u->resources_count,
             'date_registered' => $u->created_at?->format('M j, Y'),
@@ -122,6 +124,8 @@ class AdminPortalController extends Controller
             case 'verify':
                 $user->forceFill(['is_verified' => true]);
                 $user->verification_status = 'verified';
+                // Approval note (optional) replaces any earlier rejection text.
+                $user->verification_note = $reason !== '' ? $reason : null;
                 // Allow the admin to capture student status during verification.
                 if ($request->has('student_status') || $request->has('student_school')) {
                     $user->student_status = (bool) $request->input('student_status', $user->student_status ?? false);
@@ -141,6 +145,7 @@ class AdminPortalController extends Controller
                     abort(422, 'A rejection reason is required.');
                 }
                 $user->verification_status = 'rejected';
+                $user->verification_note = $reason;
                 $user->save();
                 $logAction = 'Rejected verification of '.$user->name;
                 $details = $reason;
@@ -176,6 +181,13 @@ class AdminPortalController extends Controller
         }
 
         $this->logAdminAction($request, $logAction ?? ucfirst($action).' recorded for '.$user->name, 'user', $user->id, $details);
+        VerificationHistory::create([
+            'user_id' => $user->id,
+            'admin_id' => $request->user()->id,
+            'action' => $action,
+            'status' => $user->verification_status,
+            'note' => $details ?? $reason ?: null,
+        ]);
 
         return response()->json([
             'message' => 'User '.$action.' successful.',
@@ -206,7 +218,12 @@ class AdminPortalController extends Controller
                 'is_student' => (bool) $u->student_status,
                 'student_school' => $u->student_school,
                 'role' => 'General Member',
-                'requested_at' => $u->created_at?->diffForHumans(),
+                // The submitted proof of residency the reviewer must inspect.
+                'document_type' => $u->verification_document_type,
+                'has_document' => (bool) $u->verification_document_path,
+                'submitted_at' => $u->verification_submitted_at?->toISOString(),
+                'requested_at' => $u->verification_submitted_at?->diffForHumans()
+                    ?? $u->created_at?->diffForHumans(),
             ])
             ->values();
 
@@ -241,6 +258,50 @@ class AdminPortalController extends Controller
         ]);
     }
 
+    /**
+     * GET /admin/verification/{id}/document — stream the member's submitted
+     * proof of residency to an authenticated administrator. Proof documents
+     * are sensitive (addresses / valid IDs), so they are never exposed on the
+     * public disk; the admin token gates every read.
+     */
+    public function verificationDocument(Request $request, int $id)
+    {
+        $this->guard($request);
+
+        /** @var User $user */
+        $user = User::findOrFail($id);
+        $path = (string) $user->verification_document_path;
+
+        abort_if(
+            $path === '' || ! Storage::disk('public')->exists($path),
+            404,
+            'No verification document on file.'
+        );
+
+        return Storage::disk('public')->response($path);
+    }
+
+    public function verificationHistory(Request $request, int $id)
+    {
+        $this->guard($request);
+        User::findOrFail($id);
+
+        return response()->json([
+            'history' => VerificationHistory::with('admin:id,name')
+                ->where('user_id', $id)
+                ->latest()
+                ->get()
+                ->map(fn (VerificationHistory $entry) => [
+                    'id' => $entry->id,
+                    'action' => $entry->action,
+                    'status' => $entry->status,
+                    'note' => $entry->note,
+                    'admin' => $entry->admin?->name,
+                    'created_at' => $entry->created_at?->toISOString(),
+                ]),
+        ]);
+    }
+
     private function decisionLabel(string $action): string
     {
         return match (true) {
@@ -270,10 +331,6 @@ class AdminPortalController extends Controller
             ],
             'listings' => Resource::where('user_id', $user->id)->latest()->take(20)
                 ->get(['id', 'title', 'status', 'is_active'])->toArray(),
-            'tbTransactions' => TimebankTransaction::where(function ($q) use ($email) {
-                $q->where('provider_email', $email)->orWhere('requester_email', $email);
-            })->latest()->take(20)
-                ->get(['id', 'service_title', 'status', 'credits_transferred'])->toArray(),
             // Report authorship is anonymous in this system by design.
             'reportsFiledBy' => [],
             'auditsMentioning' => AuditLog::where('target_type', 'user')
@@ -311,15 +368,21 @@ class AdminPortalController extends Controller
             'name' => $r->title,               // AdminMapPage reads r.name
             'type' => ucfirst($r->type ?? 'offer'),
             'category' => $r->category?->name ?? 'Tools',
+            'compensation_type' => $r->compensationType(),
+            'compensation_label' => $r->compensationLabel(),
+            'price' => $r->displayPrice(),
             'exchange_type' => $r->exchange_type ?? 'Lend',
             'owner' => $r->user?->name ?? 'Member',
             'user' => ['id' => $r->user?->id, 'name' => $r->user?->name ?? 'Member'],
             'status' => $r->status ?? ($r->is_active ? 'active' : 'closed'),
             'admin_status' => $this->adminStatusLabel($r),
             'location' => $r->location,
-            'lat' => $r->latitude,
-            'lng' => $r->longitude,
+            'barangay' => $r->barangay,
+            'purok_sitio' => $r->purok_sitio,
+            'lat' => $r->latitude ?? \App\Support\BarangayLocations::for($r->location)[0],
+            'lng' => $r->longitude ?? \App\Support\BarangayLocations::for($r->location)[1],
             'created_at' => $r->created_at?->format('M j, Y'),
+            'image_url' => $r->image_path ? asset('storage/'.$r->image_path) : null,
         ];
     }
 
@@ -411,6 +474,133 @@ class AdminPortalController extends Controller
         ]);
     }
 
+    // ------------------------------------------------------------------
+    // Direct inquiries (listing-scoped messaging oversight)
+    // ------------------------------------------------------------------
+
+    /** Shape a conversation for the admin Inquiries list. */
+    private function inquiryRow(Conversation $c): array
+    {
+        $listing = $c->listing;
+        $last = $c->messages->sortByDesc('id')->first();
+
+        return [
+            'id' => $c->id,
+            'listing' => $listing ? [
+                'id' => $listing->id,
+                'title' => $listing->title,
+                'compensation_type' => $listing->compensationType(),
+                'compensation_label' => $listing->compensationLabel(),
+                'price' => $listing->displayPrice(),
+            ] : null,
+            'buyer' => $c->buyer ? ['id' => $c->buyer->id, 'name' => $c->buyer->name] : null,
+            'seller' => $c->seller ? ['id' => $c->seller->id, 'name' => $c->seller->name] : null,
+            'message_count' => (int) ($c->message_count ?? $c->messages->count()),
+            'last_message' => $last?->body,
+            'last_message_at' => ($c->last_message_at ?? $last?->created_at)?->toISOString(),
+            'updated_at' => $c->updated_at?->toISOString(),
+        ];
+    }
+
+    /**
+     * GET /admin/inquiries?q=&listing_id= — every direct inquiry on the
+     * community's listings, scoped to the posts they belong to.
+     */
+    public function inquiries(Request $request)
+    {
+        $this->guard($request);
+
+        $query = Conversation::with([
+            'listing:id,title,compensation_type,price',
+            'buyer:id,name',
+            'seller:id,name',
+            'messages' => fn ($q) => $q->latest()->limit(1),
+        ])
+            ->whereNotNull('listing_id')
+            ->withCount('messages')
+            ->orderByDesc('last_message_at')
+            ->orderByDesc('updated_at');
+
+        if ($listingId = $request->query('listing_id')) {
+            $query->where('listing_id', (int) $listingId);
+        }
+
+        if ($q = trim((string) $request->query('q', ''))) {
+            $query->where(function ($w) use ($q) {
+                $w->whereHas('listing', fn ($l) => $l->where('title', 'like', "%{$q}%"))
+                    ->orWhereHas('buyer', fn ($u) => $u->where('name', 'like', "%{$q}%"))
+                    ->orWhereHas('seller', fn ($u) => $u->where('name', 'like', "%{$q}%"));
+            });
+        }
+
+        $rows = $query->get()->map(fn (Conversation $c) => $this->inquiryRow($c))->values();
+
+        return response()->json(['inquiries' => $rows, 'total' => $rows->count()]);
+    }
+
+    /**
+     * GET /admin/inquiries/{id} — the full thread, marking the member side
+     * read so the console can act as an answer desk.
+     */
+    public function inquiryMessages(Request $request, $id)
+    {
+        $this->guard($request);
+
+        $conversation = Conversation::with([
+            'listing:id,title,compensation_type,price,image_path',
+            'buyer:id,name,email',
+            'seller:id,name,email',
+        ])->findOrFail($id);
+
+        return response()->json([
+            'inquiry' => $this->inquiryRow($conversation),
+            'messages' => $conversation->messages()->with('sender:id,name,email')->oldest()->get(),
+        ]);
+    }
+
+    /**
+     * POST /admin/inquiries/{id}/reply — post an official reply into the
+     * thread. Both members are notified so the answer reaches the negotiators.
+     */
+    public function inquiryReply(Request $request, $id)
+    {
+        $this->guard($request);
+
+        $validated = $request->validate(['body' => ['required', 'string', 'max:5000']]);
+
+        $conversation = Conversation::with(['listing:id,title'])->findOrFail($id);
+
+        $message = $conversation->messages()->create([
+            'sender_id' => $request->user()->id,
+            'body' => trim($validated['body']),
+        ]);
+        $conversation->update(['last_message_at' => now()]);
+
+        $listingTitle = $conversation->listing?->title;
+        foreach ([$conversation->buyer_id, $conversation->seller_id] as $memberId) {
+            if ($memberId) {
+                \App\Models\MemberNotification::create([
+                    'user_id' => $memberId,
+                    'type' => 'message',
+                    'title' => 'CBLREP admin replied',
+                    'body' => $listingTitle
+                        ? "Regarding \"{$listingTitle}\": {$message->body}"
+                        : $message->body,
+                    'data' => ['conversation_id' => $conversation->id, 'listing_id' => $conversation->listing_id],
+                ]);
+            }
+        }
+
+        $this->logAdminAction(
+            $request,
+            'Replied to inquiry #'.$conversation->id.($listingTitle ? ' on "'.$listingTitle.'"' : ''),
+            'conversation',
+            $conversation->id,
+        );
+
+        return response()->json(['message' => $message->load('sender:id,name,email')], 201);
+    }
+
     public function map(Request $request)
     {
         $this->guard($request);
@@ -436,48 +626,88 @@ class AdminPortalController extends Controller
     {
         $this->guard($request);
 
-        $type = $request->query('type', 'all');
         $statusFilter = $request->query('status', 'all');
 
-        // Frontend type tabs -> exchange_type column values.
-        $typeMap = [
-            'freecycling' => 'freecycle',
-            'bartering' => 'barter',
-            'lending' => 'lending',
-            'timebank' => 'time_banking',
-        ];
-
-        // Status select on ExchangesPage ('cancel' tab) -> DB statuses.
+        // The panel's status select -> DB statuses. `active` is the UI's word
+        // for an agreed trade; `rejected` is listed separately from `cancelled`
+        // so a decline can be told apart from a walk-away in the audit trail.
         $statusMap = [
             'pending' => 'pending',
             'active' => 'accepted',
             'completed' => 'completed',
+            'rejected' => 'rejected',
             'cancel' => 'cancelled',
         ];
 
-        $query = Exchange::with(['resource', 'provider', 'receiver'])->latest();
+        // Both listings and both parties eager-loaded. Without this the table
+        // fires six queries per row once the offered side is rendered.
+        $query = Exchange::with([
+            'resource', 'offeredResource', 'provider', 'receiver',
+        ])->latest();
 
-        if ($mappedType = $typeMap[$type] ?? null) {
-            $query->where('exchange_type', $mappedType);
-        }
         if ($mappedStatus = $statusMap[$statusFilter] ?? null) {
             $query->where('status', $mappedStatus);
         }
 
         $rows = $query->get()->map(fn (Exchange $e) => [
+            'id' => $e->id,
             'transaction_id' => 'EX-'.str_pad((string) $e->id, 5, '0', STR_PAD_LEFT),
-            'exchange_type' => $e->frontendType(),
+
+            // Every row in this table is a direct barter, so the type column
+            // is dropped rather than filtered — there is nothing to switch.
+            'type' => $e->frontendType(),
+
+            // Side A — the listing the owner is offering.
+            'item_name' => $e->requestedLabel(),
+            'resource' => $e->requestedLabel(),
+            'resource_id' => $e->resource_id,
+
+            // Side B — what the proposer puts up. Stated by listing id, by
+            // free text, or both; `offeredLabel()` resolves all three.
+            'offered_label' => $e->offeredLabel(),
+            'offered_resource_id' => $e->offered_resource_id,
+            'offered_item' => $e->offered_item,
+
+            // Structured location of the trade (barangay + purok/sitio).
+            'barangay' => $e->barangay,
+            'purok_sitio' => $e->purok_sitio,
+
+            // Parties. `requester_name`/`owner_name` are the names the table
+            // has always rendered; the proposer_* pair makes the direction of
+            // the proposal explicit for the panel.
+            'requester_name' => $e->receiver?->name ?? 'Member',
+            'owner_name' => $e->provider?->name ?? 'Member',
+            'proposer_name' => $e->receiver?->name ?? 'Member',
+            'proposer_id' => $e->receiver_id,
+            'owner_id' => $e->provider_id,
             'users' => ($e->provider?->name ?? 'Member').' ↔ '.($e->receiver?->name ?? 'Member'),
-            'provider' => $e->provider?->name ?? 'Member',
-            'receiver' => $e->receiver?->name ?? 'Member',
-            'resource' => $e->resource?->title ?? 'Resource Exchange',
-            'disputed' => false,
+
             'status' => $e->frontendStatus(),
-            'credits' => (float) ($e->credits_exchanged ?? 0),
+            'raw_status' => $e->status,
+            'disputed' => false,
+
+            // ── Dual-confirmation progress (read-only for admins) ──
+            // Completion is member-driven only (both parties confirm via
+            // POST /api/exchanges/{id}/confirm-completion); the console
+            // renders this instead of a "Complete" button.
+            'proposer_confirmed' => (bool) $e->proposer_confirmed,
+            'owner_confirmed' => (bool) $e->owner_confirmed,
+            'proposer_confirmed_at' => $e->proposer_confirmed_at?->toISOString(),
+            'owner_confirmed_at' => $e->owner_confirmed_at?->toISOString(),
+            'confirmation_label' => $e->confirmationLabel(),
+
+            // No `due`/`dueCompleted` key: there is no return timer in a
+            // direct barter, and an empty dash column would imply one exists.
+            'updated_at' => $e->updated_at?->toISOString(),
+            'created_at' => $e->created_at?->toISOString(),
             'date' => $e->created_at?->format('M j, Y') ?? '—',
+            'updated_label' => $e->updated_at?->format('M j, Y') ?? '—',
         ])->values();
 
-        return response()->json(['exchanges' => $rows, 'total' => $rows->count()]);
+        return response()->json([
+            'exchanges' => $rows,
+            'total' => $rows->count(),
+        ]);
     }
 
     // ------------------------------------------------------------------
@@ -509,12 +739,8 @@ class AdminPortalController extends Controller
         $resources = $this->applyDateRange(Resource::query(), $from, $to);
 
         $exchanges = $this->applyDateRange(Exchange::query(), $from, $to);
-        $typeCounts = (clone $exchanges)
-            ->selectRaw('exchange_type, COUNT(*) as count')
-            ->groupBy('exchange_type')
-            ->pluck('count', 'exchange_type');
 
-                $byBarangay = Resource::with('category')
+        $byBarangay = Resource::with('category')
             ->when($from && strtotime((string) $from), fn ($q) => $q->where('created_at', '>=', $from.' 00:00:00'))
             ->when($to && strtotime((string) $to), fn ($q) => $q->where('created_at', '<=', $to.' 23:59:59'))
             ->get()
@@ -560,208 +786,16 @@ class AdminPortalController extends Controller
                 'removed' => (clone $resources)->whereIn('status', ['removed'])->count(),
             ],
             'exchanges' => [
-                'freecycling' => (int) ($typeCounts['freecycle'] ?? 0),
-                'bartering' => (int) ($typeCounts['barter'] ?? 0),
-                'lending' => (int) ($typeCounts['lending'] ?? 0),
-                'timeBanking' => (int) ($typeCounts['time_banking'] ?? 0),
+                // Direct bartering is the only transaction model, so the whole
+                // count is a single figure. The per-type breakdown that used to
+                // sit here (freecycling / bartering / lending) is gone; keeping
+                // it would have reported two permanently-zero columns.
+                'bartering' => (clone $exchanges)->count(),
                 'completed' => (clone $exchanges)->where('status', 'completed')->count(),
                 'cancelled' => (clone $exchanges)->where('status', 'cancelled')->count(),
                 'disputed' => 0,
                 'byBarangay' => $byBarangay,
             ],
-        ]);
-    }
-
-        /**
-     * Export analytics to CSV or PDF (controlled by ?fmt=csv|pdf).
-     *
-     * Auth is handled by the auth:sanctum + admin middleware on the route,
-     * but we also accept a ?token= fallback for <a href> downloads that
-     * cannot send an Authorization header.
-     */
-    public function exportAnalytics(Request $request)
-    {
-        $fmt = $request->query('fmt', 'csv');
-
-        // Auth: prefer Sanctum bearer (middleware guarantees admin), fall
-        // back to ?token= for <a href> downloads that cannot send headers.
-        if (! $request->user()) {
-            $token = \Laravel\Sanctum\PersonalAccessToken::findToken(
-                (string) $request->query('token'),
-            );
-            $admin = $token?->tokenable;
-            abort_if(
-                ! $admin || ! ($admin instanceof User) || $admin->role !== 'admin',
-                401,
-                'A valid admin token is required for this export.',
-            );
-        } else {
-            $this->guard($request);
-            $admin = $request->user();
-        }
-
-        $analyticsRequest = new Request([
-            'from' => $request->query('from'),
-            'to'   => $request->query('to'),
-        ]);
-        $analyticsRequest->setUserResolver(fn () => $admin);
-
-        $data = json_decode(json_encode($this->analytics($analyticsRequest)->getData(true)), true);
-
-        // ---- CSV export ----
-        if ($fmt === 'csv') {
-            $lines = [['Section', 'Metric', 'Count']];
-            foreach (['users', 'resources'] as $section) {
-                foreach ($data[$section] as $metric => $count) {
-                    if (! is_array($count)) {
-                        $lines[] = [ucfirst($section), ucfirst((string) $metric), $count];
-                    }
-                }
-            }
-            foreach ($data['exchanges'] as $metric => $value) {
-                if ($metric === 'byBarangay') {
-                    foreach ($value as $row) {
-                        $lines[] = ['Resources by Barangay', $row['location'] !== '' ? $row['location'] : 'Unspecified', $row['count']];
-                    }
-                    continue;
-                }
-                $lines[] = ['Exchanges', ucfirst(preg_replace('/([a-z])([A-Z])/', '$1 $2', (string) $metric)), $value];
-            }
-            foreach ($data['users']['verifiedByBarangay'] ?? [] as $row) {
-                $lines[] = ['Verified Residents by Barangay', $row['barangay'], $row['verified']];
-            }
-
-            $csv = implode("\n", array_map(
-                fn ($row) => implode(',', array_map(fn ($cell) => '"'.str_replace('"', '""', (string) $cell).'"', $row)),
-                $lines,
-            ));
-
-            return response($csv, 200, [
-                'Content-Type' => 'text/csv; charset=UTF-8',
-                'Content-Disposition' => 'attachment; filename="cblrep-analytics.csv"',
-            ]);
-        }
-
-        // ---- PDF export (print-friendly HTML) ----
-        return response($this->renderAnalyticsHtml($data), 200, [
-            'Content-Type' => 'text/html; charset=UTF-8',
-            'Content-Disposition' => 'inline; filename="cblrep-analytics.pdf"',
-        ]);
-    }
-
-    /**
-     * Render a print-friendly HTML page for the analytics dashboard.
-     * The browser's print-to-PDF dialog produces the final PDF.
-     */
-    private function renderAnalyticsHtml(array $data): string
-    {
-        $rows = [];
-        foreach (['users', 'resources'] as $section) {
-            foreach ($data[$section] ?? [] as $metric => $count) {
-                if (! is_array($count)) {
-                    $rows[] = '<tr><td>'.ucfirst($section).'</td><td>'.ucfirst((string) $metric).'</td><td>'.$count.'</td></tr>';
-                }
-            }
-        }
-        foreach ($data['exchanges'] ?? [] as $metric => $value) {
-            if ($metric === 'byBarangay') {
-                foreach ($value as $row) {
-                    $rows[] = '<tr><td>Resources by Barangay</td><td>'.($row['location'] !== '' ? $row['location'] : 'Unspecified').'</td><td>'.$row['count'].'</td></tr>';
-                }
-                continue;
-            }
-            $label = ucfirst(preg_replace('/([a-z])([A-Z])/', '$1 $2', (string) $metric));
-            $rows[] = '<tr><td>Exchanges</td><td>'.$label.'</td><td>'.$value.'</td></tr>';
-        }
-        foreach ($data['users']['verifiedByBarangay'] ?? [] as $row) {
-            $rows[] = '<tr><td>Verified Residents</td><td>'.$row['barangay'].'</td><td>'.$row['verified'].'</td></tr>';
-        }
-
-        $byBarangayRows = '';
-        foreach (($data['exchanges']['byBarangay'] ?? []) as $b) {
-            $byBarangayRows .= '<tr><td>'.($b['location'] !== '' ? $b['location'] : 'Unspecified').'</td><td>'.$b['count'].'</td></tr>';
-        }
-
-        $verifiedRows = '';
-        foreach (($data['users']['verifiedByBarangay'] ?? []) as $row) {
-            $verifiedRows .= '<tr><td>'.$row['barangay'].'</td><td>'.$row['verified'].'</td><td>'.($row['students'] ?? 0).'</td></tr>';
-        }
-
-        return '<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8">
-<title>CBLREP Analytics Report</title>
-<style>
-  body { font-family: Arial, sans-serif; margin: 24px; color: #1b382b; }
-  h1 { font-size: 20px; margin-bottom: 4px; }
-  h2 { font-size: 16px; margin-top: 24px; border-bottom: 2px solid #2d6a4f; padding-bottom: 4px; }
-  table { border-collapse: collapse; width: 100%; margin-top: 8px; }
-  th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; font-size: 12px; }
-  th { background: #e8f0e8; font-weight: bold; }
-  tr:nth-child(even) { background: #f7f7f4; }
-  .footer { margin-top: 32px; font-size: 10px; color: #888; }
-</style>
-</head><body>
-<h1>Community-Based Local Resources Exchange Portal (CBLREP)</h1>
-<p>Trinidad, Bohol &middot; Analytics Report</p>
-<p>Period: '.($data['range']['from'] ?? 'all time').' to '.($data['range']['to'] ?? 'now').'</p>
-<h2>Summary Statistics</h2>
-<table><thead><tr><th>Section</th><th>Metric</th><th>Count</th></tr></thead><tbody>'.implode('', $rows).'</tbody></table>
-<h2>Resources by Barangay</h2>
-<table><thead><tr><th>Barangay</th><th>Total Count</th></tr></thead><tbody>'.$byBarangayRows.'</tbody></table>
-<h2>Verified Residents by Barangay</h2>
-<table><thead><tr><th>Barangay</th><th>Verified Residents</th><th>Students</th></tr></thead><tbody>'.$verifiedRows.'</tbody></table>
-<div class="footer">Generated by CBLREP Admin Portal &middot; '.now()->format('M j, Y g:i A').'</div>
-</body></html>';
-    }
-
-    // ------------------------------------------------------------------
-    // Admin Time-Bank oversight (read-only ledger for admin/TimeBankPage)
-    // ------------------------------------------------------------------
-
-    public function adminTimebank(Request $request)
-    {
-        $this->guard($request);
-
-        $totals = [
-            'creditsEarned' => (float) TimebankTransaction::where('status', TimebankTransaction::STATUS_COMPLETED)
-                ->sum('credits_transferred'),
-            'creditsSpent' => (float) TimebankTransaction::where('status', TimebankTransaction::STATUS_COMPLETED)
-                ->sum('credits_transferred'),
-            'active' => TimebankTransaction::whereIn('status', [
-                TimebankTransaction::STATUS_ACCEPTED,
-                TimebankTransaction::STATUS_IN_PROGRESS,
-            ])->count(),
-            'pendingConfirmations' => TimebankTransaction::where('status', TimebankTransaction::STATUS_AWAITING_CONFIRMATION)->count(),
-            'completed' => TimebankTransaction::where('status', TimebankTransaction::STATUS_COMPLETED)->count(),
-            'disputed' => 0,
-        ];
-
-        $transactions = TimebankTransaction::query()->latest()->get()
-            ->map(fn (TimebankTransaction $t) => [
-                'transaction_id' => 'TB-'.str_pad((string) $t->id, 5, '0', STR_PAD_LEFT),
-                'service' => $t->service_title,
-                'provider' => $t->provider_name,
-                'requester' => $t->requester_name,
-                'hours_requested' => (float) $t->requested_hours,
-                'hours_completed' => (float) $t->hours_completed,
-                'credits' => ((float) $t->credits_transferred) ?: null,
-                'status' => $t->status,
-                'disputed' => false,
-                'confirmation_status' => $t->confirmation_status,
-                'created' => $t->created_at?->format('M j, Y'),
-            ])->values();
-
-        $balances = User::orderBy('name')->get()
-            ->map(fn (User $u) => [
-                'name' => $u->name,
-                'email' => $u->email,
-                'time_credit_balance' => round((float) $u->time_bank_credits, 2),
-            ])->values();
-
-        return response()->json([
-            'totals' => $totals,
-            'transactions' => $transactions,
-            'balances' => $balances,
         ]);
     }
 
@@ -815,9 +849,6 @@ class AdminPortalController extends Controller
                     'maintenanceMessage',
                     'The Trinidad portal is undergoing scheduled municipal updates. Please check back soon.'
                 ),
-                'activeBarangays' => AdminSetting::value('activeBarangays', [
-                    'Poblacion', 'Hinlayagan Ilaud', 'Hinlayagan Ilaya', 'San Vicente',
-                ]),
                 'updated_by' => $lastTouch?->updated_by,
             ],
         ]);
@@ -831,8 +862,6 @@ class AdminPortalController extends Controller
             'theme' => ['sometimes', 'in:light,dark'],
             'maintenanceMode' => 'boolean',
             'maintenanceMessage' => ['sometimes', 'string', 'max:500'],
-            'activeBarangays' => ['sometimes', 'array', 'min:1'],
-            'activeBarangays.*' => ['string', 'max:100'],
         ]);
 
         $changed = [];
