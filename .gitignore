@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Local env files — never commit machine-specific values.
+# Copy .env.example and fill it in.
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -6,7 +6,7 @@
 // react-router's NavLink (isActive).
 //
 // Exact menu structure (municipal console):
-//   Overview, Users, Verifications, Listings, Exchanges, Time Bank,
+//   Overview, Users, Verifications, Listings, Exchanges,
 //   Notifications, Content, Reports, Analytics, Audit Logs, Settings
 // plus a bottom "Sign out" button.
 // ─────────────────────────────────────────────────────────────
@@ -14,23 +14,7 @@ import { NavLink } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import logo from "../assets/logo.jpg";
 import { COMMUNITY } from "../config/community";
-
-// Flat menu matching the municipal console structure. `end: true` marks
-// exact-match routes (so /admin stays inactive on sub-pages).
-const NAV = [
-  { to: "/admin", label: "Overview", icon: "📊", end: true },
-  { to: "/admin/users", label: "Users", icon: "👥" },
-  { to: "/admin/verification", label: "Verifications", icon: "✅" },
-  { to: "/admin/listings", label: "Listings", icon: "📦", end: true },
-  { to: "/admin/exchanges", label: "Exchanges", icon: "🔄" },
-  { to: "/admin/timebank", label: "Time Bank", icon: "⏱️" },
-  { to: "/admin/notifications", label: "Notifications", icon: "🔔" },
-  { to: "/admin/content", label: "Content", icon: "📄" },
-  { to: "/admin/reports", label: "Reports", icon: "🚩" },
-  { to: "/admin/analytics", label: "Analytics", icon: "📈" },
-  { to: "/admin/audit-logs", label: "Audit Logs", icon: "📋" },
-  { to: "/admin/settings", label: "Settings", icon: "⚙️" },
-];
+import { NAV } from "./navItems";
 
 const linkClass = ({ isActive }) =>
   `flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition ${
@@ -43,7 +27,7 @@ export default function Sidebar() {
   const { logout } = useAuth();
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col bg-[#1b3b22] text-white">
+    <aside className="hidden w-56 shrink-0 flex-col bg-[#1b3b22] text-white md:flex">
       <div className="flex items-center gap-3 border-b border-white/10 px-5 py-5">
         <img src={logo} alt="CBLREP logo" className="h-10 w-10 rounded-full object-cover" />
         <div>

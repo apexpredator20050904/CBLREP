@@ -4,6 +4,7 @@
 // Approve / request-info / reject via POST /admin/users/{id}/{action}.
 // ─────────────────────────────────────────────────────────────
 import { useCallback, useEffect, useState } from "react";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import AdminLayout from "../components/AdminLayout";
 import {
   EmptyRow,
@@ -21,7 +22,7 @@ import {
   theadClass,
 } from "../components/ui";
 import { TRINIDAD_BARANGAYS } from "../config/community";
-import { decideVerification, fetchPendingVerifications } from "../services/adminApi";
+import { decideVerification, fetchPendingVerifications, openVerificationDocument } from "../services/adminApi";
 
 export default function VerificationPage() {
   const [data, setData] = useState(null);
@@ -46,7 +47,17 @@ export default function VerificationPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
+  useAutoRefresh(load, 15000);
 
+  // Open the member's submitted proof of residency in a new tab. The document
+  // is fetched with the admin bearer token, so it is never a public URL.
+  const viewDoc = async (id) => {
+    try {
+      await openVerificationDocument(id);
+    } catch (e) {
+      flash(e.message);
+    }
+  };
 
   // Collect the action payload (reason / student capture), then decide.
   const act = async (id, action) => {
@@ -101,15 +112,16 @@ export default function VerificationPage() {
               <th className={thClass}>Email</th>
               <th className={thClass}>Barangay</th>
               <th className={thClass}>Student</th>
+              <th className={thClass}>Proof of residency</th>
               <th className={thClass}>Requested</th>
               <th className={thClass}>Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-100">
             {!data ? (
-              <EmptyRow colSpan={6}>Loading verification queue…</EmptyRow>
+              <EmptyRow colSpan={7}>Loading verification queue…</EmptyRow>
             ) : data.pending.length === 0 ? (
-              <EmptyRow colSpan={6}>No pending verification requests.</EmptyRow>
+              <EmptyRow colSpan={7}>No pending verification requests.</EmptyRow>
             ) : (
               data.pending.map((u) => (
                 <tr key={u.id} className="hover:bg-stone-50">
@@ -123,12 +135,26 @@ export default function VerificationPage() {
                       <span className="text-stone-400">—</span>
                     )}
                   </td>
+                  <td className={tdClass}>
+                    {u.has_document ? (
+                      <button
+                        type="button"
+                        onClick={() => viewDoc(u.id)}
+                        className={tableActionBtn}
+                        title="Open the submitted proof of residency"
+                      >
+                        View {u.document_type ? `· ${u.document_type}` : "document"}
+                      </button>
+                    ) : (
+                      <span className="text-stone-400">No document</span>
+                    )}
+                  </td>
                   <td className={tdClass}>{u.requested_at}</td>
                   <td className={tdClass}>
                     <div className="flex flex-wrap gap-1.5">
                       <button type="button" disabled={busyId === u.id} onClick={() => act(u.id, "verify")} className={tableActionBtn}>Approve</button>
-                      <button type="button" disabled={busyId === u.id} onClick={() => act(u.id, "request-info")} className={tableActionWarn}>Request info</button>
                       <button type="button" disabled={busyId === u.id} onClick={() => act(u.id, "reject")} className={tableActionDanger}>Reject</button>
+                      <button type="button" disabled={busyId === u.id} onClick={() => act(u.id, "request-info")} className={tableActionWarn}>Request info</button>
                     </div>
                   </td>
                 </tr>

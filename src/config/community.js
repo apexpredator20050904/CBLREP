@@ -19,20 +19,42 @@ export const TRINIDAD_BARANGAYS = [
   "Kinan-oan",
   "La Union",
   "La Victoria",
-  "Mabuhay",
+  "Mabuhay Cabigohan",
   "Mahagbu",
-  "Magsaysay",
+  "Manuel M. Roxas",
+  "Poblacion",
   "San Isidro",
   "San Vicente",
-  "Santo Niño",
+  "Santo Tomas",
   "Soom",
   "Tagum Norte",
   "Tagum Sur",
 ];
 
-// Laravel backend is reached via the Vite dev-server proxy.
-// The proxy forwards all /api/* requests to http://127.0.0.1:8000.
-export const API_BASE_URL = "";
+// Origin of the Laravel backend (no trailing slash, no `/api` suffix).
+//
+// Empty by default: the app issues relative `/api/*` requests that the Vite
+// dev-server forwards to the backend named by VITE_API_TARGET (see
+// vite.config.js). Staying same-origin means no CORS preflight is required
+// while developing — including when a phone loads the app from the dev server
+// over the LAN at http://<PC-IP>:5173.
+//
+// Set VITE_API_BASE_URL in frontend/.env (e.g. http://192.168.1.74:8000) to
+// call the Laravel API directly instead. Required for a production build
+// served from a static host such as Vercel; Laravel CORS must allow that
+// origin (backend/config/cors.php). The value is inlined at build time, so
+// setting it on Vercel requires a new deployment to take effect.
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
+
+// In a production build an unset base URL means every request goes to the
+// Vercel origin and the admin console silently 404s. Surface it once at boot
+// instead of leaving the operator to debug an empty table.
+if (import.meta.env.PROD && !API_BASE_URL) {
+  console.warn(
+    "[CBLREP] VITE_API_BASE_URL is not set — API requests will use same-origin /api/*. " +
+      "Set it in the Vercel project environment variables to the Laravel API origin.",
+  );
+}
 
 export const isAdminUser = (user) => {
   if (!user) return false;

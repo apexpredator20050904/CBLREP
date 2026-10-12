@@ -53,13 +53,80 @@ export function listingTone(status) {
   return "success";
 }
 
-export function EmptyRow({ colSpan, children }) {
+// ── Flexible compensation badges ─────────────────────────────────
+// Distinct, unambiguous colours so a moderator can scan a table and tell a
+// gift from a trade from a sale at a glance:
+//   FREE SHARING → soft green, BARTER → warm amber, PAID → crisp blue.
+const COMPENSATION_STYLES = {
+  free: "bg-emerald-100 text-emerald-800 ring-emerald-200",
+  barter: "bg-amber-100 text-amber-800 ring-amber-200",
+  paid: "bg-sky-100 text-sky-800 ring-sky-200",
+};
+
+const COMPENSATION_FALLBACK = "bg-stone-100 text-stone-700 ring-stone-200";
+
+/**
+ * Render a listing's compensation type as a distinct badge.
+ *
+ * Accepts either the raw key (`free`/`barter`/`paid`) or the server's
+ * pre-computed label. When `price` is supplied on a paid listing it is shown
+ * as `PAID · ₱350`, mirroring the mobile app.
+ */
+export function CompensationBadge({ type, label, price }) {
+  const key = String(type || "").toLowerCase();
+  const text =
+    label ||
+    { free: "FREE SHARING", barter: "BARTER", paid: "PAID" }[key] ||
+    "BARTER";
+  const showPrice =
+    key === "paid" && price !== null && price !== undefined && price !== "";
+  return (
+    <span
+      className={`inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-1 text-[10px] font-bold ring-1 ${
+        COMPENSATION_STYLES[key] || COMPENSATION_FALLBACK
+      }`}
+    >
+      {text}
+      {showPrice ? ` · ₱${Number(price).toLocaleString()}` : ""}
+    </span>
+  );
+}
+
+/** Human label for a compensation key, used in filter dropdowns. */
+export function compensationLabel(key) {
+  return (
+    { free: "FREE SHARING", barter: "BARTER", paid: "PAID" }[
+      String(key || "").toLowerCase()
+    ] || "BARTER"
+  );
+}
+
+export function EmptyRow({ colSpan, children, icon = "📭" }) {
   return (
     <tr>
-      <td colSpan={colSpan} className="px-4 py-10 text-center text-sm text-stone-500">
-        {children}
+      <td colSpan={colSpan} className="px-4 py-12 text-center">
+        <div className="mx-auto flex w-fit flex-col items-center gap-2 text-stone-500">
+          <span className="text-3xl" aria-hidden>
+            {icon}
+          </span>
+          <span className="text-sm">{children}</span>
+        </div>
       </td>
     </tr>
+  );
+}
+
+/** Friendly empty-state card with icon, title, message and optional action. */
+export function EmptyState({ icon = "📭", title, message, action }) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-stone-300 bg-stone-50 px-6 py-12 text-center">
+      <div className="text-4xl" aria-hidden>
+        {icon}
+      </div>
+      <h3 className="mt-3 text-sm font-extrabold text-emerald-950">{title}</h3>
+      {message ? <p className="mt-1 max-w-sm text-xs text-stone-500">{message}</p> : null}
+      {action ? <div className="mt-4">{action}</div> : null}
+    </div>
   );
 }
 

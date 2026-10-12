@@ -8,14 +8,29 @@
 import { useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import logo from "../assets/logo.jpg";
+import AdminLoginEnrolment from "../components/AdminLoginEnrolment";
+import AdminTwoFactorModal from "../components/AdminTwoFactorModal";
 import { useAuth } from "../context/AuthContext";
 
 export default function LoginPage() {
-  const { user, isAdmin, login } = useAuth();
+  const { user, isAdmin, login, completeTwoFactor, completeEnrolment, adoptSession, skipEnrolment } =
+    useAuth();
   const navigate = useNavigate();
-  const [form, setForm] = useState({ email: "", password: "", adminCode: "" });
+  const [form, setForm] = useState({ email: "", password: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // Stage-2 challenge. Non-null only after the password has been accepted and
+  // the account is flagged two_factor_enabled. Holding the token here (not in
+  // AuthContext state) keeps it from leaking into any component that reads
+  // the session, and it is discarded the moment the operator backs out.
+  const [challenge, setChallenge] = useState(null);
+
+  // Login-time enrolment. Set after the password has been accepted and the
+  // account has NO authenticator yet — carries the QR payload the overlay
+  // renders. Mutually exclusive with `challenge` (an account is either
+  // enrolled or not), and, like it, discarded on cancel.
+  const [enrolment, setEnrolment] = useState(null);
 
   // Already signed in as admin → skip straight to the dashboard.
   if (user && isAdmin) return <Navigate to="/admin" replace />;
@@ -28,7 +43,36 @@ export default function LoginPage() {
     setError("");
     setBusy(true);
     try {
-      await login(form);
+      const result = await login(form);
+
+      if (result.requiresTwoFactor) {
+        // Password accepted but NOT signed in. Show the QR + code prompt; the
+        // Sanctum token does not exist yet, so leaving this screen cannot
+        // strand the operator in a half-authenticated state.
+        setChallenge({
+          token: result.challengeToken,
+          expiresIn: result.expiresIn,
+          qrCode: result.qrCode,
+          secret: result.secret,
+          issuer: result.issuer,
+        });
+        return;
+      }
+
+      if (result.requiresEnrolment) {
+        // Password accepted, no authenticator enrolled yet: show the QR step
+        // right here in the login flow. The session is created only once the
+        // operator confirms a scanned code (or explicitly skips).
+        setEnrolment({
+          token: result.enrolToken,
+          qrCode: result.qrCode,
+          secret: result.secret,
+          issuer: result.issuer,
+          expiresIn: result.expiresIn,
+        });
+        return;
+      }
+
       navigate("/admin", { replace: true });
     } catch (err) {
       setError(err.message || "Unable to sign in as admin.");
@@ -36,6 +80,10 @@ export default function LoginPage() {
       setBusy(false);
     }
   };
+
+  // Stage 2 resolved — the session now exists in AuthContext, so the guard at
+  // the top of this component redirects on the next render.
+  const onVerified = () => navigate("/admin", { replace: true });
 
   return (
     <div className="flex min-h-screen bg-emerald-950">
@@ -85,7 +133,7 @@ export default function LoginPage() {
               name="email"
               value={form.email}
               onChange={onChange}
-              placeholder="admin@cblrep.ph"
+              placeholder="name@example.com"
               required
               className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none"
             />
@@ -100,19 +148,6 @@ export default function LoginPage() {
               onChange={onChange}
               placeholder="Administrator password"
               required
-              className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none"
-            />
-          </label>
-
-          <label className="mt-4 block text-sm font-semibold text-stone-700">
-            Admin Access Code{" "}
-            <span className="font-normal text-stone-400">(optional for demo)</span>
-            <input
-              type="text"
-              name="adminCode"
-              value={form.adminCode}
-              onChange={onChange}
-              placeholder="6-digit code from authenticator"
               className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none"
             />
           </label>
@@ -132,6 +167,61 @@ export default function LoginPage() {
           </button>
         </form>
       </div>
+
+      {/*
+        Stage 2. Rendered only once a challenge exists. The modal calls
+        completeTwoFactor() itself, then onVerified() navigates onward; the
+        `onCancel` path drops the token so backing out invalidates it locally
+        and the operator is returned to a clean password form.
+      */}
+      {challenge && (
+        <AdminTwoFactorModal
+          challengeToken={challenge.token}
+          expiresIn={challenge.expiresIn}
+          qrCode={challenge.qrCode}
+          secret={challenge.secret}
+          issuer={challenge.issuer}
+          onVerify={(code) => completeTwoFactor(challenge.token, code)}
+          onVerified={onVerified}
+          onCancel={() => {
+            setChallenge(null);
+            setForm({ email: "", password: "" });
+            setError("");
+          }}
+        />
+      )}
+
+      {/*
+        Login-time enrolment. Rendered only once the password has passed and
+        the account has no authenticator. onConfirm returns the user plus the
+        one-time recovery codes WITHOUT making the session visible (the guard
+        at the top of this component would redirect past the codes screen);
+        onFinish adopts the session only after they have been acknowledged.
+        Cancel drops the enrol token, so the QR on screen is abandoned and
+        expires server-side on its own.
+      */}
+      {enrolment && (
+        <AdminLoginEnrolment
+          qrCode={enrolment.qrCode}
+          secret={enrolment.secret}
+          issuer={enrolment.issuer}
+          expiresIn={enrolment.expiresIn}
+          onConfirm={(code) => completeEnrolment(enrolment.token, code)}
+          onSkip={async () => {
+            await skipEnrolment(enrolment.token);
+            onVerified();
+          }}
+          onFinish={(enrolled) => {
+            adoptSession(enrolled);
+            onVerified();
+          }}
+          onCancel={() => {
+            setEnrolment(null);
+            setForm({ email: "", password: "" });
+            setError("");
+          }}
+        />
+      )}
     </div>
   );
 }

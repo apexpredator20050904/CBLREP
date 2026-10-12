@@ -5,6 +5,7 @@
 // POST /admin/reports/{id}/resolve (VerificationReportsController).
 // ─────────────────────────────────────────────────────────────
 import { useCallback, useEffect, useState } from "react";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import AdminLayout from "../components/AdminLayout";
 import {
   EmptyRow,
@@ -46,8 +47,10 @@ export default function ReportsPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
+  useAutoRefresh(load, 15000);
 
   const resolve = async (r, action = "resolve") => {
     setBusyId(r.id);

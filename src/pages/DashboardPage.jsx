@@ -7,6 +7,7 @@
 // ─────────────────────────────────────────────────────────────
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import AdminLayout from "../components/AdminLayout";
 import { StatCard } from "../components/ui";
 import { fetchDashboardStats } from "../services/adminApi";
@@ -24,9 +25,9 @@ export default function DashboardPage() {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    fetchDashboardStats().then(setData).catch((e) => setError(e.message));
-  }, []);
+  const load = () => fetchDashboardStats().then(setData).catch((e) => setError(e.message));
+  useEffect(() => { load(); }, []);
+  useAutoRefresh(load, 15000);
 
   return (
     <AdminLayout title="Admin Dashboard">
@@ -75,8 +76,8 @@ export default function DashboardPage() {
               <h2 className="mb-3 font-bold text-emerald-950">Community Health</h2>
               <dl className="divide-y divide-stone-100 text-sm">
                 {[
-                  ["Verification rate", data.verifiedUsersPercent],
-                  ["Pending verification", data.pendingVerificationPercent],
+                  ["Verification rate", data.verifiedUsersPercent ?? 0],
+                  ["Pending verification", data.pendingVerificationPercent ?? 0],
                   ["Listings awaiting review", data.pendingReviewListings ?? 0],
                   ["Exchanges this month", data.exchangesThisMonth ?? 0],
                 ].map(([label, value]) => (

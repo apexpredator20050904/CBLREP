@@ -1,16 +1,19 @@
 {
-  "name": "my-system",
+  "name": "CBLREP",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "start": "vite preview --host --port 4173",
+    "preview": "vite preview",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "check": "npm run lint && npm run build",
+    "deploy": "npx --yes vercel@latest --prod",
+    "deploy:preview": "npx --yes vercel@latest"
   },
   "dependencies": {
-    "@rolldown/binding-linux-x64-gnu": "^1.2.9",
     "axios": "^1.20.0",
     "leaflet": "^1.9.4",
     "react": "^19.2.8",
@@ -21,6 +24,7 @@
   "devDependencies": {
     "@babel/core": "^7.29.7",
     "@eslint/js": "^10.0.1",
+    "@rolldown/binding-linux-x64-gnu": "^1.2.9",
     "@rolldown/plugin-babel": "^0.2.3",
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.2.17",

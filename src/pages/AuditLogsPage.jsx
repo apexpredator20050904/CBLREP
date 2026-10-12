@@ -2,6 +2,7 @@
 // CBLRE Admin · Audit logs (/admin/audit-logs)
 // READ-ONLY immutable trail of admin decisions. Search filters locally.
 // ─────────────────────────────────────────────────────────────
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import { useEffect, useState } from "react";
 import AdminLayout from "../components/AdminLayout";
 import { EmptyRow, TableCard, tdClass, tdStrongClass, thClass, theadClass, tableClass } from "../components/ui";
@@ -12,12 +13,16 @@ export default function AuditLogsPage() {
   const [q, setQ] = useState("");
   const [error, setError] = useState("");
 
-  useEffect(() => {
+  const load = () =>
     api
       .get("/admin/audit-logs")
       .then(({ data }) => setLogs(data.logs || []))
       .catch((e) => setError(e?.response?.data?.message || "Failed to load audit logs."));
+
+  useEffect(() => {
+    load();
   }, []);
+  useAutoRefresh(load, 15000);
 
   const filtered = logs.filter(
     (l) =>
