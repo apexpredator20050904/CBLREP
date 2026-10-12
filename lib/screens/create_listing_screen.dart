@@ -107,8 +107,16 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             initialValue: category,
+            // isExpanded bounds the button to the field width so a long category
+            // name cannot overflow the form on a narrow phone.
+            isExpanded: true,
             decoration: const InputDecoration(labelText: 'Category'),
-            items: categories.map((value) => DropdownMenuItem(value: value, child: Text(value))).toList(),
+            items: categories
+                .map((value) => DropdownMenuItem(
+                      value: value,
+                      child: Text(value, overflow: TextOverflow.ellipsis),
+                    ))
+                .toList(),
             onChanged: (value) => setState(() => category = value ?? category),
           ),
           const SizedBox(height: 12),

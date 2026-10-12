@@ -70,6 +70,14 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    // ChatProvider is app-scoped, so its 3s poll timer outlives this screen
+    // unless it is stopped here — that kept hammering
+    // /conversations/{id}/messages for the rest of the app's life and drained
+    // the battery on a backgrounded app.
+    //
+    // close() clears the timer *and* the retained message list, so returning
+    // to the inbox does not hold another member's conversation in memory.
+    if (mounted) context.read<ChatProvider>().close(notify: false);
     input.dispose();
     scroll.dispose();
     super.dispose();

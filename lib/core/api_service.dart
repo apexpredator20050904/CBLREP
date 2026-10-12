@@ -434,15 +434,21 @@ class ApiService {
 
   /// PATCH /user — update profile fields (name, barangay).
   /// Falls back gracefully when the backend has no such route yet.
+  /// PATCH /user — persist profile edits for the signed-in member.
+  ///
+  /// Falls back across `/user`, `/profile` and `/me` for older backends.
+  /// The catch is on [ApiException], not DioException: [_request] converts
+  /// every transport failure into an ApiException, so an `on DioException`
+  /// clause here was unreachable and the fallback never advanced past a 404.
   Future<Map<String, dynamic>> updateProfile(Map<String, dynamic> payload) async {
     const candidates = ['/user', '/profile', '/me'];
-    DioException? last;
+    ApiException? last;
     for (final path in candidates) {
       try {
         return Map<String, dynamic>.from(await _request(_dio.patch(path, data: payload)) as Map);
-      } on DioException catch (e) {
+      } on ApiException catch (e) {
         last = e;
-        if (e.response?.statusCode == 404 || e.response?.statusCode == 405) continue;
+        if (e.statusCode == 404 || e.statusCode == 405) continue;
         rethrow;
       }
     }
@@ -580,27 +586,25 @@ class ApiService {
     return Map<String, dynamic>.from(await _request(_dio.get('/barter-proposals')) as Map);
   }
 
+  /// POST /barter-proposals — offer one of your listings against another's.
+  ///
+  /// [_request] converts transport failures into [ApiException] and already
+  /// surfaces the Laravel `message` / first validation error, so no local
+  /// catch is needed. The previous `on DioException` clause here was
+  /// unreachable and its hand-written messages could never be shown.
   Future<Map<String, dynamic>> createBarterProposal({
     required int offeredItemId,
     required int requestedItemId,
   }) async {
-    try {
-      return Map<String, dynamic>.from(await _request(_dio.post('/barter-proposals', data: {
-        'offered_item_id': offeredItemId,
-        'requested_item_id': requestedItemId,
-      })) as Map);
-    } on DioException catch (e) {
-      throw ApiException(e.response?.data?['message']?.toString() ?? 'Could not send the barter proposal.', e.response?.statusCode);
-    }
+    return Map<String, dynamic>.from(await _request(_dio.post('/barter-proposals', data: {
+      'offered_item_id': offeredItemId,
+      'requested_item_id': requestedItemId,
+    })) as Map);
   }
 
   Future<Map<String, dynamic>> updateBarterProposalStatus(int id, String status) async {
-    try {
-      return Map<String, dynamic>.from(await _request(
-          _dio.patch('/barter-proposals/$id/status', data: {'status': status})) as Map);
-    } on DioException catch (e) {
-      throw ApiException(e.response?.data?['message']?.toString() ?? 'Could not update the proposal.', e.response?.statusCode);
-    }
+    return Map<String, dynamic>.from(await _request(
+        _dio.patch('/barter-proposals/$id/status', data: {'status': status})) as Map);
   }
 
   Future<Map<String, dynamic>> updateExchange(int id, String status) async {

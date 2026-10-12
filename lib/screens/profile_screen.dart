@@ -38,8 +38,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 10),
           DropdownButtonFormField<String>(
             initialValue: trinidadBarangays.contains(barangay) ? barangay : trinidadBarangays.first,
+            // isExpanded bounds the button to the field width. Without it the
+            // dropdown sizes to its widest item — "Mabuhay Cabigohan" and
+            // "Manuel M. Roxas" overflow a narrow phone's dialog.
+            isExpanded: true,
             decoration: const InputDecoration(labelText: 'Barangay'),
-            items: trinidadBarangays.map((b) => DropdownMenuItem(value: b, child: Text(b))).toList(),
+            items: trinidadBarangays
+                .map((b) => DropdownMenuItem(
+                      value: b,
+                      child: Text(b, overflow: TextOverflow.ellipsis),
+                    ))
+                .toList(),
             onChanged: (v) { if (v != null) barangay = v; },
           ),
           const SizedBox(height: 10),

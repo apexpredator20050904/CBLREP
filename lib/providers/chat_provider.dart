@@ -87,13 +87,19 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  void close() {
+  /// Tears the open thread down.
+  ///
+  /// [notify] is false when a screen is being disposed: firing listeners
+  /// there would schedule a rebuild of a widget already on its way out,
+  /// which Flutter flags as "setState called during dispose". The state is
+  /// still cleared either way, so another member's messages are not retained.
+  void close({bool notify = true}) {
     _timer?.cancel();
     _timer = null;
     conversationId = null;
     conversation = null;
     messages = const [];
-    notifyListeners();
+    if (notify) notifyListeners();
   }
 
   @override
