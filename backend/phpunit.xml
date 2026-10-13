@@ -2,10 +2,10 @@
 <!--
     Local test configuration.
 
-    WHY THIS OVERRIDES phpunit.xml.dist
-    ====================================
+    WHY THIS DOES NOT USE SQLITE
+    ============================
 
-    The committed dist file defaults to in-memory SQLite, but:
+    Laravel's skeleton defaults to in-memory SQLite, but:
 
       1. pdo_sqlite is not installed on this machine (no pdo_sqlite.so on
          disk), so that connection cannot connect at all.

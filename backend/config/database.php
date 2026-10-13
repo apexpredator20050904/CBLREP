@@ -8,7 +8,9 @@ return [
     |--------------------------------------------------------------------------
     */
 
-    'default' => env('DB_CONNECTION', 'sqlite'),
+    // The app runs on MySQL/MariaDB; SQLite is only a Laravel skeleton
+    // fallback and is not provisioned here. Set DB_CONNECTION in .env.
+    'default' => env('DB_CONNECTION', 'mysql'),
 
     /*
     |--------------------------------------------------------------------------
