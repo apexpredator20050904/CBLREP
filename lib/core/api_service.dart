@@ -154,7 +154,15 @@ class ApiService {
 
   final _secure = const FlutterSecureStorage();
 
-  Future<void> init() async {
+  /// Restores the persisted session (if any) from device storage.
+  ///
+  /// Returns true when a stored token was found and applied to the client —
+  /// i.e. the member had signed in with "Remember me". Returns false when
+  /// nothing was persisted (an unremembered sign-in keeps its token in
+  /// memory only, so an app restart starts from a clean login screen), which
+  /// lets the launch gate skip the `GET /user` round-trip and its
+  /// "session ended" banner entirely.
+  Future<bool> init() async {
     // A release build shipped without CBLREP_API_URL can never reach the
     // backend. Say so loudly once at startup instead of letting every screen
     // show a generic network error.
@@ -184,26 +192,44 @@ class ApiService {
     }
     if (token != null && token.isNotEmpty) {
       _dio.options.headers['Authorization'] = 'Bearer $token';
+      return true;
     }
+    return false;
   }
 
-  Future<void> _setToken(String token) async {
-    try {
-      await _secure.write(key: _tokenKey, value: token);
-    } catch (_) {
-      // Last-resort fallback when the keystore is unavailable.
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_tokenKey, token);
+  /// Applies the token for the current sign-in.
+  ///
+  /// `persist: true` (Remember Me) writes it to encrypted storage so the next
+  /// launch can restore the session; `persist: false` keeps the token in the
+  /// Dio header only — memory — and wipes any previously stored copy, so
+  /// killing the app always ends an unremembered session.
+  Future<void> _setToken(String token, {required bool persist}) async {
+    if (persist) {
+      try {
+        await _secure.write(key: _tokenKey, value: token);
+      } catch (_) {
+        // Last-resort fallback when the keystore is unavailable.
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_tokenKey, token);
+      }
+    } else {
+      await _wipeStoredToken();
     }
     _dio.options.headers['Authorization'] = 'Bearer $token';
   }
 
-  Future<void> clearToken() async {
+  /// Removes every persisted copy of the token (secure store + legacy prefs).
+  Future<void> _wipeStoredToken() async {
     try {
       await _secure.delete(key: _tokenKey);
     } catch (_) {}
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_tokenKey);
+  }
+
+  /// Drops the session entirely: revokes local persistence and the header.
+  Future<void> clearToken() async {
+    await _wipeStoredToken();
     _dio.options.headers.remove('Authorization');
   }
 
@@ -380,11 +406,21 @@ class ApiService {
     }
   }
 
-  Future<Map<String, dynamic>> login(String email, String password) async {
+  /// POST /login — authenticates and applies the session token.
+  ///
+  /// With [rememberMe] the token is persisted (long-lived, chosen by the
+  /// backend) and survives an app restart; without it the token lives only in
+  /// memory for this run of the app.
+  Future<Map<String, dynamic>> login(String email, String password,
+      {bool rememberMe = false}) async {
     final data = Map<String, dynamic>.from(await _request(
-      _dio.post('/login', data: {'email': email, 'password': password}),
+      _dio.post('/login', data: {
+        'email': email,
+        'password': password,
+        'remember_me': rememberMe,
+      }),
     ) as Map);
-    await _setToken(data['access_token'] as String);
+    await _setToken(data['access_token'] as String, persist: rememberMe);
     return data;
   }
 
@@ -581,32 +617,6 @@ class ApiService {
         'purok_sitio': purokSitio,
       })) as Map);
 
-  // ── Barter proposals ──────────────────────────────────────────
-  Future<Map<String, dynamic>> barterProposals() async {
-    return Map<String, dynamic>.from(await _request(_dio.get('/barter-proposals')) as Map);
-  }
-
-  /// POST /barter-proposals — offer one of your listings against another's.
-  ///
-  /// [_request] converts transport failures into [ApiException] and already
-  /// surfaces the Laravel `message` / first validation error, so no local
-  /// catch is needed. The previous `on DioException` clause here was
-  /// unreachable and its hand-written messages could never be shown.
-  Future<Map<String, dynamic>> createBarterProposal({
-    required int offeredItemId,
-    required int requestedItemId,
-  }) async {
-    return Map<String, dynamic>.from(await _request(_dio.post('/barter-proposals', data: {
-      'offered_item_id': offeredItemId,
-      'requested_item_id': requestedItemId,
-    })) as Map);
-  }
-
-  Future<Map<String, dynamic>> updateBarterProposalStatus(int id, String status) async {
-    return Map<String, dynamic>.from(await _request(
-        _dio.patch('/barter-proposals/$id/status', data: {'status': status})) as Map);
-  }
-
   Future<Map<String, dynamic>> updateExchange(int id, String status) async {
     try {
       return Map<String, dynamic>.from(
@@ -660,9 +670,65 @@ class ApiService {
       Map<String, dynamic>.from(
           await _request(_dio.get('/conversations/$id/messages')) as Map);
 
-  Future<Map<String, dynamic>> sendConversationMessage(int id, String body) async =>
-      Map<String, dynamic>.from(await _request(
+  Future<Map<String, dynamic>> sendConversationMessage(int id, String body,
+      {File? file, void Function(int sent, int total)? onProgress}) async {
+    if (file == null) {
+      return Map<String, dynamic>.from(await _request(
           _dio.post('/conversations/$id/messages', data: {'body': body})) as Map);
+    }
+    final fileName = file.path.split(Platform.pathSeparator).last;
+    final form = FormData.fromMap({
+      'body': body,
+      'file': await MultipartFile.fromFile(file.path, filename: fileName),
+    });
+    return Map<String, dynamic>.from(await _request(_dio.post(
+      '/conversations/$id/messages',
+      data: form,
+      onSendProgress: onProgress,
+    )) as Map);
+  }
+
+  /// POST /messages (multipart) — direct send with optional photo/document.
+  /// Used by the chat attachment flow; body may be an empty caption.
+  Future<Map<String, dynamic>> sendMessageWithFile({
+    required int conversationId,
+    required String body,
+    required File file,
+    void Function(int sent, int total)? onProgress,
+  }) async {
+    final fileName = file.path.split(Platform.pathSeparator).last;
+    final form = FormData.fromMap({
+      'conversation_id': conversationId,
+      'body': body,
+      'file': await MultipartFile.fromFile(file.path, filename: fileName),
+    });
+    final data = Map<String, dynamic>.from(await _request(_dio.post(
+      '/messages',
+      data: form,
+      onSendProgress: onProgress,
+    )) as Map);
+    return Map<String, dynamic>.from(data['message'] as Map);
+  }
+
+  // ── Per-message actions (edit / delete) ─────────────────────────────────
+  //
+  // These are keyed on the message, not the conversation: the backend
+  // re-resolves the thread from the message so a non-participant gets a 404
+  // rather than a 403 that would confirm the id exists.
+
+  /// PUT /messages/{id} — edit a message you sent. Returns the stored copy,
+  /// including the `edited_at` marker the backend stamps.
+  Future<Map<String, dynamic>> editMessage(int messageId, String body) async {
+    final data = Map<String, dynamic>.from(await _request(
+      _dio.put('/messages/$messageId', data: {'body': body}),
+    ) as Map);
+    return Map<String, dynamic>.from(data['message'] as Map);
+  }
+
+  /// DELETE /messages/{id} — remove a message you sent.
+  Future<void> deleteMessage(int messageId) async {
+    await _request(_dio.delete('/messages/$messageId'));
+  }
 
   Future<List<dynamic>> messages() async {
     try {
