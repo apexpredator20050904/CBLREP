@@ -11,8 +11,6 @@ class LiveHubProvider extends ChangeNotifier {
   LiveHubProvider(this.api);
 
   List<dynamic> exchanges = const [];
-  List<dynamic> barterProposalsIncoming = const [];
-  List<dynamic> barterProposalsOutgoing = const [];
   List<dynamic> notifications = const [];
   int unreadCount = 0;
   List<dynamic> conversations = const [];
@@ -51,9 +49,8 @@ class LiveHubProvider extends ChangeNotifier {
   /// Cheap fingerprint of everything the UI renders from this provider.
   String get _fingerprint => [
         exchanges.length,
-        barterProposalsIncoming.length + barterProposalsOutgoing.length,
-        [...barterProposalsIncoming, ...barterProposalsOutgoing]
-            .map((p) => '${(p as Map)['id']}:${(p as Map)['status']}')
+        exchanges
+            .map((e) => '${(e as Map)['id']}:${(e as Map)['raw_status'] ?? (e as Map)['status']}')
             .join(','),
         notifications.length,
         unreadCount,
@@ -67,7 +64,6 @@ class LiveHubProvider extends ChangeNotifier {
           api.notifications().catchError((_) => <String, dynamic>{}),
           api.conversations().catchError((_) => <dynamic>[]),
           api.dashboardStats().catchError((_) => <String, dynamic>{}),
-          api.barterProposals().catchError((_) => <String, dynamic>{}),
         ]);
         exchanges = (results[0] as List).toList();
         final notif = Map<String, dynamic>.from(results[1] as Map);
@@ -75,9 +71,6 @@ class LiveHubProvider extends ChangeNotifier {
         unreadCount = (notif['unread_count'] as num?)?.toInt() ?? 0;
         conversations = (results[2] as List).toList();
         dashboard = Map<String, dynamic>.from(results[3] as Map);
-        final barter = Map<String, dynamic>.from(results[4] as Map);
-        barterProposalsIncoming = List<dynamic>.from(barter['incoming'] ?? const []);
-        barterProposalsOutgoing = List<dynamic>.from(barter['outgoing'] ?? const []);
       });
 
   void startLive({Duration interval = const Duration(seconds: 10)}) {

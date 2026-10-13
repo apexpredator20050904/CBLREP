@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/live_hub_provider.dart';
-import '../screens/barter_inbox_screen.dart';
 import '../screens/create_listing_screen.dart';
 import '../screens/exchanges_screen.dart';
 import '../screens/home_feed_screen.dart';
@@ -26,7 +25,6 @@ class _CblrepShellState extends State<CblrepShell> {
   static const _pages = [
     HomeFeedScreen(),
     ExchangesScreen(),
-    BarterInboxScreen(),
     MapScreen(),
     MessagesScreen(),
     ProfileScreen(),
@@ -103,7 +101,6 @@ class _CblrepShellState extends State<CblrepShell> {
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
           NavigationDestination(icon: Icon(Icons.swap_horiz_outlined), selectedIcon: Icon(Icons.swap_horiz), label: 'Exchanges'),
-          NavigationDestination(icon: Icon(Icons.handshake_outlined), selectedIcon: Icon(Icons.handshake), label: 'Barters'),
           NavigationDestination(icon: Icon(Icons.map_outlined), selectedIcon: Icon(Icons.map), label: 'Map'),
           NavigationDestination(icon: Icon(Icons.chat_bubble_outline), selectedIcon: Icon(Icons.chat_bubble), label: 'Messages'),
           NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Profile'),
