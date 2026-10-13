@@ -369,6 +369,84 @@ class ExchangeController extends Controller
     }
 
     // ------------------------------------------------------------------
+    // Legacy barter-proposal aliases
+    // ------------------------------------------------------------------
+
+    /**
+     * GET /api/barter-proposals — incoming + outgoing for the caller.
+     *
+     * Reads the exchange table. This route existed before the collapse and
+     * both clients still call it, so it is kept as an alias over
+     * [Exchange] rather than deleted — the response is the same shape
+     * `BarterProposalController` produced, rebuilt from exchange relations.
+     */
+    public function barterProposals(Request $request)
+    {
+        $userId = $request->user()->id;
+
+        // An exchange is "incoming" for the member who was asked to trade:
+        // the provider (owner of the wanted listing). The proposer sees it as
+        // "outgoing". Same partition the old barter_proposals endpoint used.
+        $incoming = Exchange::with(['resource', 'offeredResource', 'receiver', 'provider'])
+            ->where('provider_id', $userId)
+            ->latest()
+            ->get()
+            ->map(fn (Exchange $e) => $this->present($e, $userId))
+            ->values();
+
+        $outgoing = Exchange::with(['resource', 'offeredResource', 'receiver', 'provider'])
+            ->where('receiver_id', $userId)
+            ->latest()
+            ->get()
+            ->map(fn (Exchange $e) => $this->present($e, $userId))
+            ->values();
+
+        return response()->json([
+            'incoming' => $incoming,
+            'outgoing' => $outgoing,
+        ]);
+    }
+
+    /**
+     * PATCH /api/barter-proposals/{id}/status — accept / reject / complete.
+     *
+     * Alias of [update()]. `completed` is accepted here too and routed to
+     * [confirmCompletion()], because the exchange state machine only allows
+     * single-party completion through the dual-confirmation path — the
+     * weaker direct "mark completed" transition the old barter flow allowed
+     * is gone with the table.
+     */
+    public function barterProposalStatus(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'status' => ['required', Rule::in([
+                Exchange::STATUS_ACCEPTED,
+                Exchange::STATUS_REJECTED,
+                Exchange::STATUS_CANCELLED,
+                Exchange::STATUS_COMPLETED,
+            ])],
+        ]);
+
+        if ($validated['status'] === Exchange::STATUS_COMPLETED) {
+            return $this->confirmCompletion($request, (int) $id);
+        }
+
+        return $this->update($request, $id);
+    }
+
+    /**
+     * POST /api/barter-proposals — propose a trade.
+     *
+     * Alias of [store()]. Both sides of the trade are required, so the
+     * collapse also removes the old path's ability to create a one-sided
+     * "proposal" that was really a gift.
+     */
+    public function storeBarterProposal(Request $request)
+    {
+        return $this->store($request);
+    }
+
+    // ------------------------------------------------------------------
     // Helpers
     // ------------------------------------------------------------------
 
@@ -421,6 +499,32 @@ class ExchangeController extends Controller
             'dueCompleted' => $exchange->status === Exchange::STATUS_COMPLETED
                 ? $exchange->updated_at?->format('M j, Y')
                 : '—',
+
+            // ── Legacy barter-proposal keys ───────────────────────────
+            // `GET /api/barter-proposals` now reads the exchange table, and
+            // both clients (Flutter inbox, admin Barter Requests page) still
+            // read these field names. They are aliases of the values above,
+            // computed from the same relations — one model, one shape.
+            'direction' => $isProposer ? 'outgoing' : 'incoming',
+            'counterparty' => ($isProposer ? $exchange->provider : $exchange->receiver)?->name ?? 'Member',
+            'created_at' => $exchange->created_at?->format('M j, Y') ?? 'Today',
+            'offered_item' => $this->itemPayload($exchange->offeredResource),
+            'requested_item' => $this->itemPayload($exchange->resource),
+        ];
+    }
+
+    /** Title + photo + location for one side of a trade. */
+    private function itemPayload(?Resource $resource): ?array
+    {
+        if (! $resource) {
+            return null;
+        }
+
+        return [
+            'id' => $resource->id,
+            'title' => $resource->title,
+            'image_url' => $resource->image_path ? asset('storage/'.$resource->image_path) : null,
+            'location' => $resource->location,
         ];
     }
 

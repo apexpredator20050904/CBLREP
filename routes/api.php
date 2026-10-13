@@ -7,7 +7,6 @@ use App\Http\Controllers\Api\AdminTwoFactorController;
 use App\Http\Controllers\Api\AdminUserController;
 use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\BarterProposalController;
 use App\Http\Controllers\Api\ContentAdminController;
 use App\Http\Controllers\Api\ConversationController;
 use App\Http\Controllers\Api\DashboardController;
@@ -124,15 +123,29 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/exchanges/{id}/confirm-completion', [ExchangeController::class, 'confirmCompletion']);
 
     // Barter proposals (item-for-item negotiation)
-    Route::get('/barter-proposals', [BarterProposalController::class, 'index']);
-    Route::post('/barter-proposals', [BarterProposalController::class, 'store']);
-    Route::patch('/barter-proposals/{id}/status', [BarterProposalController::class, 'updateStatus']);
+    // Barter proposals were collapsed into exchanges (migration
+    // 2026_10_13_000001). These routes are kept as aliases over
+    // ExchangeController so existing clients keep working unchanged — the
+    // response is the same shape, rebuilt from exchange relations.
+    Route::get('/barter-proposals', [ExchangeController::class, 'barterProposals']);
+    Route::post('/barter-proposals', [ExchangeController::class, 'storeBarterProposal']);
+    Route::patch('/barter-proposals/{id}/status', [ExchangeController::class, 'barterProposalStatus']);
 
     // Authenticated direct messaging.
     Route::get('/conversations', [ConversationController::class, 'index']);
     Route::post('/conversations', [ConversationController::class, 'store']);
     Route::get('/conversations/{id}/messages', [ConversationController::class, 'messages']);
     Route::post('/conversations/{id}/messages', [ConversationController::class, 'send']);
+
+    // Per-message actions. Ownership is enforced in the controller: the
+    // caller must be a participant of the thread AND the sender of that
+    // message, so nobody can edit or remove somebody else's chat.
+    // POST /messages accepts multipart/form-data (body + optional file) for
+    // photo/document sharing into a conversation.
+    Route::post('/messages', [ConversationController::class, 'storeMessage']);
+    Route::put('/messages/{id}', [ConversationController::class, 'updateMessage']);
+    Route::patch('/messages/{id}', [ConversationController::class, 'updateMessage']);
+    Route::delete('/messages/{id}', [ConversationController::class, 'deleteMessage']);
 
     // Member announcements and action notifications.
     Route::get('/notifications', [NotificationController::class, 'index']);
