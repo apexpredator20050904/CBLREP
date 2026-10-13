@@ -707,30 +707,6 @@ export async function approveExchange(id, status, reason = "") {
   }
 }
 
-// ── Barter proposals (member-facing trade negotiation) ──
-export async function fetchBarterProposals() {
-  const { data } = await api.get("/barter-proposals");
-  return data;
-}
-
-export async function createBarterProposal({ offered_item_id, requested_item_id }) {
-  try {
-    const { data } = await api.post("/barter-proposals", { offered_item_id, requested_item_id });
-    return data;
-  } catch (err) {
-    throw new Error(errMsg(err, "Could not send the barter proposal."), { cause: err });
-  }
-}
-
-export async function updateBarterStatus(id, status) {
-  try {
-    const { data } = await api.patch(`/barter-proposals/${id}/status`, { status });
-    return data;
-  } catch (err) {
-    throw new Error(errMsg(err, `Could not mark the proposal ${status}.`), { cause: err });
-  }
-}
-
 // Legacy pages under src/admin/ import { apiFetch, getToken,
 // exportAnalyticsUrl, downloadCSV, openPDF } from "./api". Keep those names
 // working by delegating to the axios client above.

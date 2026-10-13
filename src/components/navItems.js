@@ -8,7 +8,6 @@ export const NAV = [
   { to: "/admin/inquiries", label: "Inquiries", icon: "💬" },
   { to: "/admin/map", label: "Map", icon: "🗺️" },
   { to: "/admin/exchanges", label: "Exchanges", icon: "🔄" },
-  { to: "/admin/barter-requests", label: "Barter Requests", icon: "🤝" },
   { to: "/admin/notifications", label: "Notifications", icon: "🔔" },
   { to: "/admin/content", label: "Content", icon: "📄" },
   { to: "/admin/reports", label: "Reports", icon: "🚩" },

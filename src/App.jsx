@@ -36,7 +36,6 @@ import ListingsPage from "./pages/ListingsPage";
 import MapPage from "./pages/MapPage";
 import InquiriesPage from "./pages/InquiriesPage";
 import ExchangesPage from "./pages/ExchangesPage";
-import BarterRequestsPage from "./pages/BarterRequestsPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import ContentPage from "./pages/ContentPage";
 import ReportsPage from "./pages/ReportsPage";
@@ -74,7 +73,6 @@ export default function App() {
             <Route path="/admin/listings/flagged" element={<ErrorBoundary><ListingsPage kind="flagged" /></ErrorBoundary>} />
             <Route path="/admin/inquiries" element={<ErrorBoundary><InquiriesPage /></ErrorBoundary>} />
             <Route path="/admin/exchanges" element={<ErrorBoundary><ExchangesPage /></ErrorBoundary>} />
-            <Route path="/admin/barter-requests" element={<ErrorBoundary><BarterRequestsPage /></ErrorBoundary>} />
             <Route path="/admin/notifications" element={<ErrorBoundary><NotificationsPage /></ErrorBoundary>} />
             <Route path="/admin/content" element={<ErrorBoundary><ContentPage /></ErrorBoundary>} />
             <Route path="/admin/reports" element={<ErrorBoundary><ReportsPage /></ErrorBoundary>} />
