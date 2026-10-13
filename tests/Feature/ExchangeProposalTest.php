@@ -116,6 +116,12 @@ class ExchangeProposalTest extends TestCase
         $proposer = $this->member('proposer@example.test');
         $wanted = $this->listing($owner, 'A desk');
 
+        // The suite runs against the shared development database with
+        // DatabaseTransactions (see RUNNING.md §5.5a), so other exchanges —
+        // demo/seed data included — may already exist. Assert the *intent*
+        // (no new row was written) rather than a global count of zero.
+        $before = Exchange::count();
+
         // No offered_resource_id and no offered_item — this is a request for
         // a free gift, not a barter.
         $this->actingAs($proposer)
@@ -127,7 +133,7 @@ class ExchangeProposalTest extends TestCase
             ->assertStatus(422)
             ->assertJsonValidationErrors('offered_item');
 
-        $this->assertSame(0, Exchange::count());
+        $this->assertSame($before, Exchange::count());
     }
 
     public function test_a_member_cannot_propose_against_their_own_listing(): void

@@ -30,15 +30,25 @@ return [
     'allowed_origins' => [
         'http://localhost:5173',
         'http://127.0.0.1:5173',
-        'http://192.168.1.74:5173',
+        'http://192.168.0.231:5173',
     ],
 
     // Match any dev origin served from localhost or a private IPv4 address
     // (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), on any port. This is what
     // lets a teammate's phone or a second machine hit the API over the LAN
     // without editing this file for every new device.
+    //
+    // The ngrok entries below cover the public HTTPS tunnel used for the
+    // capstone defense: the React admin console is loaded from a Vercel/local
+    // origin but calls the API through `*.ngrok-free.app`. Only the admin
+    // console is subject to CORS — the Flutter client sends no Origin header.
     'allowed_origins_patterns' => [
         '#^https?://(localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})(:\d+)?$#',
+        // ngrok free/paid tunnel hostnames (the subdomain changes per session).
+        '#^https://[a-z0-9-]+\.ngrok-free\.app$#',
+        '#^https://[a-z0-9-]+\.ngrok-free\.dev$#',
+        '#^https://[a-z0-9-]+\.ngrok\.app$#',
+        '#^https://[a-z0-9-]+\.ngrok\.io$#',
     ],
 
     'allowed_headers' => ['*'],
