@@ -18,17 +18,20 @@ flutter build apk --release --dart-define=CBLREP_API_URL=https://cblrep-api.onre
 `ApiService.baseUrlCandidates` (`lib/core/api_service.dart`) resolves the host at
 compile time:
 
-- **Release** builds accept `CBLREP_API_URL`, falling back to the single
-  editable line `kCblrepApiUrlFallback` in `lib/config/api_config.dart` when the
-  define is omitted. The emulator/LAN/loopback candidates (`10.0.2.2`,
-  `192.168.x.x`, `127.0.0.1`) are compiled out — they are unreachable from a
-  real phone and would just fail confusingly.
+- **Release** builds accept `CBLREP_API_URL`. When the define is omitted the
+  fallback (`kCblrepApiUrlFallback` in `lib/config/api_config.dart`) is the
+  placeholder sentinel, so the build is treated as unconfigured rather than
+  silently pointing at a stale host. The emulator/LAN/loopback candidates
+  (`10.0.2.2`, `192.168.x.x`, `127.0.0.1`) are compiled out — they are
+  unreachable from a real phone and would just fail confusingly.
 - **Debug/profile** builds keep the dev fallbacks so `flutter run` still works
-  against a laptop backend. Override with `--dart-define=CBLREP_LAN_IP=<pc-ip>`
-  and `--dart-define=CBLREP_API_PORT=8000`.
-- If a release build is produced with **neither** the define nor an edited
-  fallback, the app logs `CBLREP_API_URL was not set at build time` at startup
-  and points at a dead sentinel host rather than pretending to work.
+  against a laptop backend. No machine IP is committed; pass the PC's address
+  with `--dart-define=CBLREP_LAN_IP=<pc-ip>` (and
+  `--dart-define=CBLREP_API_PORT=8000` if non-default).
+- `build_release.sh` requires the URL as its first argument, so the normal
+  release path can never ship an unconfigured APK. If one is produced anyway,
+  the app logs `CBLREP_API_URL was not set at build time` at startup and points
+  at a dead sentinel host rather than pretending to work.
 
 Trailing slashes and a trailing `/api` in the value are normalised away, so
 `https://host.com`, `https://host.com/` and `https://host.com/api` are equivalent.

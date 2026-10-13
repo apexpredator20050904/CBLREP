@@ -6,20 +6,22 @@
 ///   1. `--dart-define=CBLREP_API_URL=https://…`  — wins, per build
 ///   2. [kCblrepApiUrlFallback]                    — used when the define is absent
 ///
-/// The defense build is produced with the explicit `--dart-define` so the URL
-/// is visible in the build command, but this fallback keeps a plain
-/// `flutter build apk --release` (or a CI run that forgets the flag) pointed at
-/// the live tunnel instead of a dead sentinel host.
+/// The production origin is always supplied at build time, e.g.
 ///
-/// Keep this the ONLY place a production URL is written. Never hardcode a host
-/// anywhere else.
+///   ./build_release.sh https://api.your-domain.com
 ///
-/// To re-point the app at a new tunnel, edit the single line below.
-const String kCblrepApiUrlFallback =
-    'https://contest-bunny-unsorted.ngrok-free.dev';
+/// so no live URL is hardcoded here. When the define is absent the fallback
+/// below resolves to the [kCblrepApiUrlPlaceholder] sentinel, which `ApiService`
+/// treats as "unconfigured": a release build then reports the problem loudly
+/// (see `ApiService.releaseConfigError`) instead of silently pointing at a
+/// stale host.
+const String kCblrepApiUrlFallback = kCblrepApiUrlPlaceholder;
 
 /// Sentinel for "no real URL configured yet". `ApiService` treats this exact
-/// value as *unset* so a release build says so loudly (see
-/// `ApiService.releaseConfigError`) instead of trying to reach a fake host.
+/// value as *unset* so a release build fails loudly rather than trying to reach
+/// a fake host.
+///
+/// Set [kCblrepApiUrlFallback] to a real origin only if you deliberately want a
+/// plain `flutter build apk --release` (no `--dart-define`) to ship a live URL.
 const String kCblrepApiUrlPlaceholder =
-    'https://REPLACE-WITH-NGROK-SUBDOMAIN.ngrok-free.app';
+    'https://REPLACE-WITH-YOUR-API-HOST.example';

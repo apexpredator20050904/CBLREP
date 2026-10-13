@@ -32,12 +32,12 @@ class ApiService {
   // always talks to exactly the host it was built for.
   //
   // When the define is absent, [kCblrepApiUrlFallback]
-  // (`lib/config/api_config.dart`) is used instead — a single, easily edited
-  // line that keeps a plain release build reachable. An *unedited* placeholder
-  // is treated as "not configured": the emulator/LAN/localhost candidates are
-  // dev-only and are NOT compiled into a release APK, because
-  // `baseUrlCandidates` is built from `kReleaseMode` at the top level (see
-  // [releaseConfigError]).
+  // (`lib/config/api_config.dart`) is used instead. It defaults to the
+  // placeholder sentinel, so an unconfigured release build is treated as "not
+  // configured" and reports the error loudly rather than pointing at a stale
+  // host. The emulator/LAN/localhost candidates are dev-only and are NOT
+  // compiled into a release APK, because `baseUrlCandidates` is built from
+  // `kReleaseMode` at the top level (see [releaseConfigError]).
   static const _envBaseUrl = String.fromEnvironment(
     'CBLREP_API_URL',
     defaultValue: kCblrepApiUrlFallback,
@@ -47,9 +47,10 @@ class ApiService {
   /// release build (production host only) from a local one.
   static const bool _isReleaseBuild = bool.fromEnvironment('dart.vm.product');
 
-  // Dev-only overrides — ignored entirely by release builds.
-  static const _envLanIp = String.fromEnvironment('CBLREP_LAN_IP',
-      defaultValue: '192.168.0.231');
+  // Dev-only overrides — ignored entirely by release builds. No machine-specific
+  // IP is committed; pass the PC's address with
+  // `--dart-define=CBLREP_LAN_IP=<ip>` when running on a physical device.
+  static const _envLanIp = String.fromEnvironment('CBLREP_LAN_IP', defaultValue: '');
   static const _envPort = String.fromEnvironment('CBLREP_API_PORT', defaultValue: '8000');
 
   /// The configured production origin, or empty when nothing usable was
@@ -407,8 +408,8 @@ class ApiService {
   }
 
   /// Names the host the app actually tried, so "can't reach the server" is
-  /// actionable instead of vague: the member sees whether they are pointed at
-  /// 192.168.0.231 (PC on the same Wi-Fi) or a deployed API.
+  /// actionable instead of vague: the member sees whether they are pointed at a
+  /// PC on the same Wi-Fi or a deployed API.
   String _connectivityHint() {
     final host = baseUrlHost;
     return "Unable to connect to the CBLREP server at $host. "
