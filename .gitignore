@@ -16,6 +16,8 @@
 !/storage/framework/sessions/.gitignore
 /storage/framework/views/*
 !/storage/framework/views/.gitignore
+# Test-uploaded attachments (Storage::fake disks live under testing/).
+/storage/framework/testing/
 /storage/logs/*
 !/storage/logs/.gitignore
 /storage/app/*.json
