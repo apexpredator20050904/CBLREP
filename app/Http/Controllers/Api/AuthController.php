@@ -21,6 +21,12 @@ class AuthController extends Controller
     /** Minutes a mailed reset code stays valid. */
     private const RESET_CODE_TTL = 15;
 
+    /** Hours a standard member token lives when "Remember me" is off. */
+    private const STANDARD_TOKEN_TTL_HOURS = 24;
+
+    /** Days a remembered member token lives when "Remember me" is on. */
+    private const REMEMBERED_TOKEN_TTL_DAYS = 30;
+
     /**
      * POST /api/register — community member sign-up (Register.jsx).
      */
@@ -108,13 +114,22 @@ class AuthController extends Controller
     }
 
     /**
-     * POST /api/login — member sign-in (Login.jsx). Returns a Sanctum token.
+     * POST /api/login — member sign-in (mobile Login screen). Returns a Sanctum token.
+     *
+     * `remember_me` (optional, defaults to false) selects the token lifetime:
+     * remembered sign-ins get a long-lived token ({@see REMEMBERED_TOKEN_TTL_DAYS})
+     * while a plain sign-in expires after {@see STANDARD_TOKEN_TTL_HOURS}.
+     * Sanctum enforces `expires_at` on every authenticated request, so an
+     * expired token is rejected with a 401 exactly like a revoked one.
      */
     public function login(Request $request)
     {
         $credentials = $request->validate([
             'email' => ['required', 'email'],
             'password' => ['required', 'string'],
+            // Absent == false, so any client that predates Remember Me keeps
+            // the short-lived token behaviour by simply not sending the field.
+            'remember_me' => ['sometimes', 'boolean'],
         ]);
 
         $user = User::where('email', strtolower($credentials['email']))->first();
@@ -129,7 +144,7 @@ class AuthController extends Controller
             ], 403);
         }
 
-        return $this->tokenResponse($user, 'cblrep-member');
+        return $this->tokenResponse($user, 'cblrep-member', $request->boolean('remember_me'));
     }
 
     /**
@@ -484,11 +499,25 @@ class AuthController extends Controller
         return ['dev_code' => $code, 'dev_email' => $user->email];
     }
 
-    private function tokenResponse(User $user, string $device)
+    /**
+     * Mints the Sanctum token for a member sign-in with an explicit expiry.
+     *
+     * @param  bool  $remember  True for a long-lived "remember me" token,
+     *                          false for the standard short-lived session.
+     */
+    private function tokenResponse(User $user, string $device, bool $remember = false)
     {
+        $ttlSeconds = $remember
+            ? self::REMEMBERED_TOKEN_TTL_DAYS * 86400
+            : self::STANDARD_TOKEN_TTL_HOURS * 3600;
+        $expiresAt = Carbon::now()->addSeconds($ttlSeconds);
+
         return response()->json([
-            'access_token' => $user->createToken($device)->plainTextToken,
+            'access_token' => $user->createToken($device, ['*'], $expiresAt)->plainTextToken,
             'token_type' => 'Bearer',
+            // Lifetime in seconds so the client can surface / plan around it.
+            'expires_in' => $ttlSeconds,
+            'remembered' => $remember,
             'user' => $user->toFrontendArray(),
         ]);
     }
