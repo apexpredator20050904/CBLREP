@@ -4,10 +4,13 @@
     <!-- Fine location powers the "near me" proximity filter on the community map. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Camera capture for chat photo attachments (image_picker). -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <application
         android:label="CBLREP"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@mipmap/launcher_icon"
         android:usesCleartextTraffic="true">
         <!-- Google Maps SDK key. Injected from local.properties / CI as a
              manifest placeholder — see MAPS_API_KEY in android/app/build.gradle.kts. -->

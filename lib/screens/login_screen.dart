@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../config/community.dart';
 import '../core/feedback.dart';
 import '../core/input_sanitizer.dart';
+import '../core/session_prefs.dart';
 import '../providers/auth_provider.dart';
 import '../theme/cblrep_theme.dart';
 import '../widgets/cblrep_shell.dart';
@@ -21,6 +22,29 @@ class _LoginScreenState extends State<LoginScreen> {
   final password = TextEditingController();
   final formKey = GlobalKey<FormState>();
 
+  /// Initial state of the "Remember me" box; replaced with the member's
+  /// saved preference (and their e-mail, if the last sign-in was remembered)
+  /// as soon as the preferences load.
+  bool rememberMe = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPreferences();
+  }
+
+  Future<void> _loadPreferences() async {
+    final remember = await SessionPrefs.rememberPreference();
+    final savedEmail = await SessionPrefs.rememberedEmail();
+    if (!mounted) return;
+    setState(() {
+      rememberMe = remember;
+      if (savedEmail != null && savedEmail.isNotEmpty && email.text.isEmpty) {
+        email.text = savedEmail;
+      }
+    });
+  }
+
   @override
   void dispose() { email.dispose(); password.dispose(); super.dispose(); }
 
@@ -32,7 +56,7 @@ class _LoginScreenState extends State<LoginScreen> {
     // does not leave stale "session ended" text above the form.
     if (auth.sessionExpired) auth.clearSessionExpiredNotice();
     try {
-      await auth.login(email.text, password.text);
+      await auth.login(email.text, password.text, rememberMe: rememberMe);
       if (!mounted) return;
       Feedback.success(context, 'Signed in. Welcome back!');
       // Replace the whole auth stack: a signed-in member lands on the
@@ -113,14 +137,33 @@ class _LoginScreenState extends State<LoginScreen> {
                         TextFormField(controller: email, keyboardType: TextInputType.emailAddress, autocorrect: false, textInputAction: TextInputAction.next, decoration: const InputDecoration(labelText: 'Email', prefixIcon: Icon(Icons.email_outlined)), validator: (value) { final clean = InputSanitizer.email(value ?? ''); if (clean.isEmpty) return 'Email is required'; if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(clean)) return 'Enter a valid email'; return null; }),
                         const SizedBox(height: 12),
                         PasswordField(controller: password, label: 'Password', textInputAction: TextInputAction.done, onSubmitted: (_) => submit(), validator: (value) => value != null && value.isNotEmpty ? null : 'Password is required'),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: TextButton(
+                        // Remember me (left) shares the row with
+                        // "Forgot password?" (right): the box decides whether
+                        // this session survives an app restart.
+                        Row(children: [
+                          Checkbox(
+                            value: rememberMe,
+                            onChanged: (value) =>
+                                setState(() => rememberMe = value ?? false),
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          Text(
+                            'Remember me',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: dark ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                          const Spacer(),
+                          TextButton(
                             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ForgotPasswordScreen(email: InputSanitizer.email(email.text)))),
                             style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 4), minimumSize: const Size(0, 32), tapTargetSize: MaterialTapTargetSize.shrinkWrap),
                             child: const Text('Forgot password?', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                           ),
-                        ),
+                        ]),
                         const SizedBox(height: 10),
                         FilledButton(onPressed: context.watch<AuthProvider>().loading ? null : submit, child: Text(context.watch<AuthProvider>().loading ? 'Signing in…' : 'Sign in')),
                         TextButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RegisterScreen())), child: const Text('Create a member account')),

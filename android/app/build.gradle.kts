@@ -21,7 +21,10 @@ if (hasReleaseKeystore) {
 
 android {
     namespace = "com.example.untitled1"
-    compileSdk = flutter.compileSdkVersion
+    // file_picker (chat attachments) pulls in flutter_plugin_android_lifecycle,
+    // whose AAR requires compiling against Android API 36+. Pinned explicitly
+    // rather than inheriting Flutter's lower default so the plugin graph builds.
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

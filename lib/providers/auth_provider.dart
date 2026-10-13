@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../core/api_service.dart';
 import '../core/input_sanitizer.dart';
+import '../core/session_prefs.dart';
 import '../models/models.dart';
 
 class AuthProvider extends ChangeNotifier {
@@ -42,7 +43,14 @@ class AuthProvider extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
-      await api.init();
+      final hadStoredToken = await api.init();
+      if (!hadStoredToken) {
+        // No persisted session (signed out, or the last sign-in was not
+        // remembered): land on the login form straight away, with no
+        // "session ended" banner — there was no session to end.
+        user = null;
+        return;
+      }
       user = UserModel.fromJson(await api.currentUser());
     } on ApiException catch (exception) {
       final status = exception.statusCode;
@@ -94,12 +102,20 @@ class AuthProvider extends ChangeNotifier {
     super.dispose();
   }
 
-  Future<void> login(String email, String password) async {
+  /// Signs the member in.
+  ///
+  /// [rememberMe] decides how the session survives the app: when true the
+  /// token is persisted (and validated via `GET /user` on the next launch,
+  /// bypassing the login screen); when false it lives in memory only, so
+  /// killing the app requires signing in again. The checkbox state and the
+  /// e-mail are recorded in [SessionPrefs] on success.
+  Future<void> login(String email, String password, {bool rememberMe = false}) async {
     error = null;
     loading = true;
     notifyListeners();
     try {
-      final data = await api.login(email.trim(), password);
+      final data = await api.login(email.trim(), password, rememberMe: rememberMe);
+      await SessionPrefs.recordSignIn(rememberMe: rememberMe, email: email.trim());
       user = UserModel.fromJson(Map<String, dynamic>.from(data['user'] as Map));
     } on ApiException catch (exception) {
       error = exception.message;
@@ -120,7 +136,10 @@ class AuthProvider extends ChangeNotifier {
     error = null;
     try {
       await api.register(fullName: name, email: email, barangay: barangay, purokSitio: purokSitio, password: password);
-      await login(email, password);
+      // The register screen has no "Remember me" box, so a brand-new member
+      // gets the persistent session they would have chosen by default — they
+      // are never bounced back to the sign-in form after their first restart.
+      await login(email, password, rememberMe: true);
     } on ApiException catch (exception) {
       error = exception.message;
       rethrow;
@@ -135,6 +154,11 @@ class AuthProvider extends ChangeNotifier {
       // api.logout() clears the stored token in its finally block regardless,
       // so the local session is dropped either way.
     }
+    // Sign-out purges every saved login preference (checkbox state +
+    // remembered e-mail) so nothing identifying survives on the device.
+    try {
+      await SessionPrefs.clear();
+    } catch (_) {}
     user = null;
     notifyListeners();
   }

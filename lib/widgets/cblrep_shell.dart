@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../providers/auth_provider.dart';
 import '../providers/live_hub_provider.dart';
 import '../screens/create_listing_screen.dart';
 import '../screens/exchanges_screen.dart';
 import '../screens/home_feed_screen.dart';
+import '../screens/login_screen.dart';
 import '../screens/map_screen.dart';
 import '../screens/messages_screen.dart';
 import '../screens/notifications_screen.dart';
@@ -22,6 +24,11 @@ class CblrepShell extends StatefulWidget {
 class _CblrepShellState extends State<CblrepShell> {
   int index = 0;
 
+  /// App-scoped providers captured once, so disposing this shell never has to
+  /// reach for a context that is already going away.
+  late final LiveHubProvider _hub;
+  AuthProvider? _auth;
+
   static const _pages = [
     HomeFeedScreen(),
     ExchangesScreen(),
@@ -33,7 +40,40 @@ class _CblrepShellState extends State<CblrepShell> {
   @override
   void initState() {
     super.initState();
-    Future.microtask(() => context.read<LiveHubProvider>().startLive());
+    _hub = context.read<LiveHubProvider>();
+    // The launch gate (AuthGate) is popped the moment the member signs in, so
+    // nothing else reacts when a session dies mid-run — the shell simply kept
+    // rendering with no token while every authenticated call, Message /
+    // Inquire included, came back "Unauthenticated." Watch the auth state from
+    // here and put the member back on the sign-in form instead.
+    _auth = context.read<AuthProvider>()..addListener(_onAuthChanged);
+    Future.microtask(_hub.startLive);
+  }
+
+  void _onAuthChanged() {
+    // A deliberate sign-out is owned by ProfileScreen (it shows the
+    // confirmation and navigates itself); only a session that expired
+    // underneath the member needs rescuing from here.
+    if (!mounted || _auth?.user != null || _auth?.sessionExpired != true) return;
+    Future.microtask(() {
+      if (!mounted || _auth?.user != null) return;
+      _hub.stopLive();
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+        (route) => false,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _auth?.removeListener(_onAuthChanged);
+    // The hub lives at app scope, so its 10-second poll would otherwise keep
+    // firing after this shell is gone: token-less requests that can only ever
+    // answer 401, and whose late replies may land in the middle of the next
+    // sign-in.
+    _hub.stopLive();
+    super.dispose();
   }
 
   @override

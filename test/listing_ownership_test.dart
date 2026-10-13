@@ -110,5 +110,22 @@ void main() {
           reason: 'A signed-out visitor is never the owner.');
       expect(find.text('Message / Inquire'), findsOneWidget);
     });
+
+    testWidgets('Message / Inquire offers sign-in instead of a 401', (tester) async {
+      await useTallSurface(tester);
+      await tester.pumpWidget(_host(_listing(ownerId: ownerId), null));
+      await tester.pumpAndSettle();
+
+      // The listing feed is public, so a visitor reaches this screen without
+      // a session. POST /conversations is authenticated, so tapping the button
+      // blind only ever produced the backend's raw "Unauthenticated." string.
+      await tester.tap(find.text('Message / Inquire'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Sign in required'), findsOneWidget,
+          reason: 'A visitor must be offered the sign-in form, not a '
+              'server-side error they cannot act on.');
+      expect(find.text('Sign in'), findsOneWidget);
+    });
   });
 }

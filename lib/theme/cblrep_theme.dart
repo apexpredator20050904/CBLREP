@@ -51,7 +51,7 @@ class CblrepLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Decode the 1408×768 progressive JPEG at (twice) the displayed size, not
+    // Decode the 1024×1024 logo PNG at (twice) the displayed size, not
     // at full source resolution — every instance on every screen otherwise
     // pays a multi-millisecond decode, which reads as jank on emulators and
     // low-end phones. RepaintBoundary caches the raster per instance.
@@ -64,7 +64,7 @@ class CblrepLogo extends StatelessWidget {
           padding: EdgeInsets.all(padding),
           child: ClipOval(
             child: Image.asset(
-              'assets/cblrep_logo.jpg',
+              'assets/images/logo.png',
               width: radius * 2,
               height: radius * 2,
               fit: BoxFit.cover,

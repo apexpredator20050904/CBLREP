@@ -63,6 +63,12 @@ class AuthGate extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              Image.asset(
+                'assets/images/logo.png',
+                width: 140,
+                height: 140,
+              ),
+              const SizedBox(height: 20),
               const CircularProgressIndicator(),
               const SizedBox(height: 14),
               Text(

@@ -265,18 +265,114 @@ class ChatMessageModel {
   final int senderId;
   final DateTime? sentAt;
 
-  const ChatMessageModel({required this.id, required this.body, required this.sender, required this.senderId, this.sentAt});
+  /// Set by the backend when a member edits a message, so the bubble can
+  /// render a Messenger-style "Edited" marker.
+  final bool edited;
+
+  /// Optimistically-created rows (the bubble that appears the instant you hit
+  /// send) have no server id yet, so actions requiring one are unavailable
+  /// until the poll reconciles them with the stored copy.
+  final bool isPending;
+
+  /// Messenger-style attachment fields served by `Message::toChatPayload()`.
+  /// `fileType` is `image` or `document`; `fileUrl` is absolute and already
+  /// rewritten when possible, with `_resolveImageUrl` as fallback.
+  final String? fileUrl;
+  final String? fileType;
+  final String? fileName;
+  final int? fileSize;
+  final String? mimeType;
+
+  const ChatMessageModel({
+    required this.id,
+    required this.body,
+    required this.sender,
+    required this.senderId,
+    this.sentAt,
+    this.edited = false,
+    this.isPending = false,
+    this.fileUrl,
+    this.fileType,
+    this.fileName,
+    this.fileSize,
+    this.mimeType,
+  });
+
+  /// True when this message carries a photo or document attachment — a remote
+  /// URL from the server, or a local staging path on an optimistic row.
+  bool get hasAttachment =>
+      (fileUrl ?? '').isNotEmpty || (fileName ?? '').isNotEmpty;
+
+  /// True for photo attachments rendered inline with rounded corners.
+  /// Falls back to extension/mime sniffing when the backend type is absent,
+  /// and never treats a local document staging path as an image.
+  bool get isImage {
+    if (fileType == 'image') return true;
+    if (fileType == 'document') return false;
+    if (!hasAttachment) return false;
+    // Optimistic rows store `fileName` without a type until reconciled —
+    // trust the name first (set from the picked file on both platforms).
+    return _looksLikeImage();
+  }
+
+  bool _looksLikeImage() {
+    final name = (fileName ?? '').toLowerCase();
+    final mime = (mimeType ?? '').toLowerCase();
+    return mime.startsWith('image/') ||
+        name.endsWith('.jpg') ||
+        name.endsWith('.jpeg') ||
+        name.endsWith('.png') ||
+        name.endsWith('.webp');
+  }
+
+  /// Human-readable file size for the document card subtitle.
+  String get displayFileSize {
+    final bytes = fileSize ?? 0;
+    if (bytes <= 0) return '';
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  /// Resolved absolute URL for the attachment, honouring the same host-rewrite
+  /// rule as listing photos so LAN/emulator builds load correctly.
+  String? get resolvedFileUrl => _resolveImageUrl(fileUrl);
 
   factory ChatMessageModel.fromJson(Map<String, dynamic> json) {
     final sender = json['sender'] is Map ? Map<String, dynamic>.from(json['sender'] as Map) : const {};
+    final id = '${json['id'] ?? ''}';
+    final sizeRaw = json['file_size'];
     return ChatMessageModel(
-      id: '${json['id'] ?? ''}',
+      id: id,
       body: (json['body'] ?? json['message'] ?? '') as String,
       sender: (sender['name'] ?? json['senderName'] ?? json['fromEmail'] ?? 'Member') as String,
       senderId: (json['sender_id'] as num?)?.toInt() ?? 0,
       sentAt: DateTime.tryParse('${json['created_at'] ?? ''}'),
+      edited: json['edited_at'] != null,
+      // Server ids are integers; the optimistic placeholder is "local-<ts>".
+      isPending: id.startsWith('local-'),
+      fileUrl: (json['file_url'] ?? json['fileUrl']) as String?,
+      fileType: json['file_type'] as String?,
+      fileName: json['file_name'] as String?,
+      fileSize: sizeRaw is num ? sizeRaw.toInt() : int.tryParse('$sizeRaw'),
+      mimeType: json['mime_type'] as String?,
     );
   }
+
+  ChatMessageModel copyWith({String? body, bool? edited}) => ChatMessageModel(
+        id: id,
+        body: body ?? this.body,
+        sender: sender,
+        senderId: senderId,
+        sentAt: sentAt,
+        edited: edited ?? this.edited,
+        isPending: isPending,
+        fileUrl: fileUrl,
+        fileType: fileType,
+        fileName: fileName,
+        fileSize: fileSize,
+        mimeType: mimeType,
+      );
 }
 
 class MessageModel {

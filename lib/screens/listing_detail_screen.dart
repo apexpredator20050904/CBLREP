@@ -7,6 +7,7 @@ import '../providers/auth_provider.dart';
 import '../providers/listings_provider.dart';
 import '../theme/cblrep_theme.dart';
 import 'chat_screen.dart';
+import 'login_screen.dart';
 
 /// Item details — full listing info, a direct-barter proposal form, message
 /// owner, and manage (close) for owners.
@@ -44,6 +45,52 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     }
   }
 
+  /// True when it is worth firing the inquiry request at all.
+  ///
+  /// The public listing feed does not need a session, so this screen is
+  /// reachable signed out — and a session can also die mid-run. Opening a
+  /// thread needs both, so ask first instead of sending a request that can
+  /// only answer 401 and putting the raw server string ("Unauthenticated.")
+  /// in front of the member.
+  Future<bool> _canMessage() async {
+    if (context.read<AuthProvider>().isAuthenticated) return true;
+    return _promptSignIn(
+      'Sign in to message the owner about this listing.',
+    );
+  }
+
+  /// Offers the sign-in form and always resolves false: the form replaces the
+  /// whole stack with a fresh dashboard, so nothing should continue afterwards.
+  Future<bool> _promptSignIn(String message) async {
+    if (!mounted) return false;
+    final goToSignIn = await Feedback.confirm(
+      context,
+      title: 'Sign in required',
+      message: message,
+      confirmLabel: 'Sign in',
+    );
+    if (!goToSignIn || !mounted) return false;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+    );
+    return false;
+  }
+
+  /// Surfaces an API failure without ever leaking the backend's phrasing for
+  /// a rejected session, and without offering a RETRY that cannot succeed.
+  void _reportFailure(ApiException e, VoidCallback onRetry) {
+    if (!mounted) return;
+    if (e.statusCode == 401) {
+      // The session died while the member was reading the listing. AuthProvider
+      // has already been told, so the shell returns them to the sign-in form;
+      // this only explains why the screen is going away.
+      Feedback.error(context, 'Your session has expired. Please sign in again.');
+      return;
+    }
+    Feedback.error(context, e.message, onRetry: onRetry);
+  }
+
   /// Open the direct-inquiry chat. This is the single negotiation channel for
   /// every compensation type — claim a gift, arrange a trade, or agree a price
   /// and pickup — replacing the old fixed barter-proposal forms.
@@ -54,6 +101,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
       }
       return;
     }
+    if (!await _canMessage()) return;
     try {
       // Scope the thread to this listing so the conversation shows which post
       // the inquiry is about, and each listing gets its own chat.
@@ -71,7 +119,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
         MaterialPageRoute(builder: (_) => ChatScreen(conversationId: id, title: widget.listing.owner)),
       );
     } on ApiException catch (e) {
-      if (mounted) Feedback.error(context, e.message, onRetry: _messageOwner);
+      _reportFailure(e, _messageOwner);
     }
   }
 
@@ -96,6 +144,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
       if (mounted) Feedback.info(context, 'Owner chat is unavailable for this listing.');
       return;
     }
+    if (!await _canMessage()) return;
     try {
       final res = await ApiService.instance.startConversation(
         widget.listing.ownerId,
@@ -117,7 +166,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
         ),
       );
     } on ApiException catch (e) {
-      if (mounted) Feedback.error(context, e.message, onRetry: () => _openChat(prefill));
+      _reportFailure(e, () => _openChat(prefill));
     }
   }
 
