@@ -20,10 +20,26 @@
 /storage/framework/testing/
 /storage/logs/*
 !/storage/logs/.gitignore
+# Reports/state the API writes at runtime.
 /storage/app/*.json
-# Uploaded listing photos are user content, not source. They live on the
-# `public` disk and are served via public/storage.
-#/storage/app/public/listing-images/
+# Uploaded user content (listing photos, verification documents, chat
+# attachments) is stored on the `public` disk and served via public/storage.
+# It is user data, never source — keep it out of the repository.
+/storage/app/public/*
+!/storage/app/public/.gitignore
+/storage/app/private/*
+!/storage/app/private/.gitignore
+
+# Compiled admin console / Laravel Vite output. Rebuild from `frontend/` with
+# `npm run build`; never commit generated bundles.
+/public/admin/
+/public/build/
+# `php artisan storage:link` recreates this on the server. The previously
+# committed copy was a symlink to an absolute dev-machine path.
+/public/storage
+
+# Local SQLite database (the app runs on MySQL — see .env.example).
+/database/*.sqlite
 
 # Local tooling
 /.phpunit.result.cache

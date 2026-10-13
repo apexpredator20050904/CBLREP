@@ -26,11 +26,11 @@ return [
     'allowed_methods' => ['*'],
 
     // Explicit origins for the Vite dev server / preview on this machine.
-    // Replace or extend the LAN entry when the PC's IP address changes.
+    // Private-LAN and loopback origins are already covered by the pattern
+    // below, so only the dev-server defaults are listed here.
     'allowed_origins' => [
         'http://localhost:5173',
         'http://127.0.0.1:5173',
-        'http://192.168.0.231:5173',
     ],
 
     // Match any dev origin served from localhost or a private IPv4 address

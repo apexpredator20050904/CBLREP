@@ -21,7 +21,9 @@ class VerificationReportsController extends Controller
 {
     private function storePath(): string
     {
-        return 'app/reports.json';
+        // Relative to the default (`local`) disk root, storage/app/. The old
+        // value ("app/reports.json") resolved to storage/app/app/reports.json.
+        return 'reports.json';
     }
 
     /** @return array<int, array<string, mixed>> */
