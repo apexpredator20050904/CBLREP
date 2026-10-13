@@ -69,6 +69,9 @@ class ListingController extends Controller
             'type' => 'nullable|string',
             // free | barter | paid — how the member wants to share.
             'compensation_type' => 'nullable|in:free,barter,paid',
+            // What the owner wants back. Only meaningful for a barter — free
+            // and paid listings have no return side, so it is nulled below.
+            'wanted_item' => 'nullable|string|max:160',
             // Optional even for a paid sale: a seller may prefer to negotiate
             // the figure in chat, so no price is mandatory at post time.
             'price' => 'nullable|numeric|min:0|max:9999999',
@@ -103,6 +106,11 @@ class ListingController extends Controller
             // Price is stored only for a paid sale; free/barter keep it null so
             // a stale figure can never surface on a gift or trade.
             'price' => $compensation === Resource::PAID ? ($validated['price'] ?? null) : null,
+            // The return side of a barter. Advisory only — the owner still
+            // accepts or rejects each proposal — so free/paid never retain it.
+            'wanted_item' => $compensation === Resource::BARTER
+                ? ($validated['wanted_item'] ?? null)
+                : null,
             'condition' => $validated['condition'] ?? 'Good',
             'title' => $validated['title'],
             'description' => $validated['description'] ?? '',
@@ -143,6 +151,7 @@ class ListingController extends Controller
             // moderation action on their own listing.
             'status' => 'sometimes|in:closed',
             'image' => 'nullable|image|mimes:jpg,jpeg,png|max:5120',
+            'wanted_item' => 'nullable|string|max:160',
         ]);
         if ($request->hasFile('image')) {
             if ($resource->image_path) Storage::disk('public')->delete($resource->image_path);
@@ -158,6 +167,15 @@ class ListingController extends Controller
         }
         if (array_key_exists('compensation_type', $validated)) {
             $resource->compensation_type = $validated['compensation_type'] ?: $resource->compensationType();
+        }
+        // The return side lives on barter listings only. Clearing it when the
+        // compensation changes away from barter stops a stale "wanted" note
+        // surfacing on what is now a gift or a sale — whether or not the
+        // request carried an explicit wanted_item.
+        if (array_key_exists('wanted_item', $validated) || array_key_exists('compensation_type', $validated)) {
+            $resource->wanted_item = $resource->compensationType() === Resource::BARTER
+                ? ($validated['wanted_item'] ?? $resource->wanted_item)
+                : null;
         }
         // Keep price and mode consistent: a paid listing needs its figure,
         // anything else is stored as null.

@@ -34,6 +34,7 @@ class Resource extends Model
         'category_id',
         'type',
         'compensation_type',
+        'wanted_item',
         'price',
         'condition',
         'title',
@@ -112,6 +113,11 @@ class Resource extends Model
             'type' => $this->type ?? 'offer',
             'compensation_type' => $this->compensationType(),
             'compensation_label' => $this->compensationLabel(),
+            // What the owner wants back. Null for free/paid — they have no
+            // return side — so the UI can render "Wants: …" only on barter.
+            'wanted_item' => $this->compensationType() === self::BARTER
+                ? $this->wanted_item
+                : null,
             'price' => $this->displayPrice(),
             'condition' => $this->condition ?? 'Good',
             'location' => $this->location ?? '',

@@ -132,6 +132,75 @@ class ListingModerationTest extends TestCase
         $this->assertSame('A borrowed drill', $listing->fresh()->title);
     }
 
+    public function test_barter_listing_stores_what_the_owner_wants_in_return(): void
+    {
+        $owner = $this->member();
+
+        $this->actingAs($owner)
+            ->postJson('/api/listings', [
+                'title' => 'A drill',
+                'type' => 'offer',
+                'compensation_type' => 'barter',
+                'wanted_item' => 'A hammer',
+                'barangay' => 'Poblacion',
+                'purok_sitio' => 'Purok 3',
+            ])
+            ->assertCreated();
+
+        $this->assertDatabaseHas('resources', [
+            'title' => 'A drill',
+            'wanted_item' => 'A hammer',
+        ]);
+    }
+
+    public function test_wanted_item_is_ignored_on_non_barter_listings(): void
+    {
+        $owner = $this->member();
+
+        // A free listing has no return side, so the field must not survive.
+        $this->actingAs($owner)
+            ->postJson('/api/listings', [
+                'title' => 'A gift',
+                'type' => 'offer',
+                'compensation_type' => 'free',
+                'wanted_item' => 'A hammer',
+                'barangay' => 'Poblacion',
+                'purok_sitio' => 'Purok 3',
+            ])
+            ->assertCreated();
+
+        $this->assertDatabaseHas('resources', [
+            'title' => 'A gift',
+            'wanted_item' => null,
+        ]);
+    }
+
+    public function test_wanted_item_can_be_updated(): void
+    {
+        $owner = $this->member();
+        $listing = $this->listingFor($owner);
+
+        $this->actingAs($owner)
+            ->patchJson("/api/listings/{$listing->id}", ['wanted_item' => 'A bicycle'])
+            ->assertOk();
+
+        $this->assertSame('A bicycle', $listing->fresh()->wanted_item);
+    }
+
+    public function test_wanted_item_is_cleared_when_compensation_leaves_barter(): void
+    {
+        $owner = $this->member();
+        $listing = $this->listingFor($owner);
+        $listing->update(['wanted_item' => 'A hammer']);
+
+        $this->actingAs($owner)
+            ->patchJson("/api/listings/{$listing->id}", ['compensation_type' => 'free'])
+            ->assertOk();
+
+        $this->assertNull($listing->fresh()->wanted_item,
+            'A gift has no return side — the stale wanted note must not survive.');
+    }
+
     public function test_another_member_cannot_close_the_listing(): void
     {
         $owner = $this->member();
