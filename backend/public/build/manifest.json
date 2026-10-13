@@ -1,0 +1,53 @@
+{
+  "_rolldown-runtime-hePW80VL.js": {
+    "file": "assets/rolldown-runtime-hePW80VL.js",
+    "name": "rolldown-runtime"
+  },
+  "resources/css/app.css": {
+    "file": "assets/app-BM8Bxt3d.css",
+    "name": "app",
+    "names": [
+      "app.css"
+    ],
+    "src": "resources/css/app.css",
+    "isEntry": true
+  },
+  "resources/js/app.js": {
+    "file": "assets/app-BqgaNf3H.js",
+    "name": "app",
+    "src": "resources/js/app.js",
+    "isEntry": true,
+    "imports": [
+      "_rolldown-runtime-hePW80VL.js"
+    ]
+  },
+  "src/assets/logo.jpg": {
+    "file": "assets/logo-CoDwC_ja.jpg",
+    "src": "src/assets/logo.jpg"
+  },
+  "src/assets/react.svg": {
+    "file": "assets/react-CHdo91hT.svg",
+    "src": "src/assets/react.svg"
+  },
+  "src/assets/vite.svg": {
+    "file": "assets/vite-BF8QNONU.svg",
+    "src": "src/assets/vite.svg"
+  },
+  "src/main.jsx": {
+    "file": "assets/main-uuLiDAMI.js",
+    "name": "main",
+    "src": "src/main.jsx",
+    "isEntry": true,
+    "imports": [
+      "_rolldown-runtime-hePW80VL.js"
+    ],
+    "css": [
+      "assets/main-CsyEGRYZ.css"
+    ],
+    "assets": [
+      "assets/logo-CoDwC_ja.jpg",
+      "assets/react-CHdo91hT.svg",
+      "assets/vite-BF8QNONU.svg"
+    ]
+  }
+}
