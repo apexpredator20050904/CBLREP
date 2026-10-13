@@ -11,7 +11,7 @@ export default defineConfig(({ mode }) => {
   // Where the Vite dev-server proxy forwards /api/* requests. Defaults to this
   // machine's LAN IP so the backend is reachable from a phone on the same
   // Wi-Fi; override with VITE_API_TARGET in frontend/.env when the IP changes.
-  const apiTarget = env.VITE_API_TARGET || 'http://192.168.1.74:8000'
+  const apiTarget = env.VITE_API_TARGET || 'http://192.168.0.231:8000'
 
   return {
     plugins: [
