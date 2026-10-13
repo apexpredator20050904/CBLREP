@@ -132,6 +132,36 @@ class ListingModerationTest extends TestCase
         $this->assertSame('A borrowed drill', $listing->fresh()->title);
     }
 
+    public function test_another_member_cannot_close_the_listing(): void
+    {
+        $owner = $this->member();
+        $intruder = User::create([
+            'name' => 'Someone Else',
+            'email' => 'else@example.test',
+            'password' => bcrypt('secret1234'),
+            'role' => 'user',
+            'barangay' => 'Poblacion',
+            'barangay_or_location' => 'Poblacion',
+            'purok_sitio' => 'Purok 3',
+        ]);
+        $listing = $this->listingFor($owner);
+
+        // The close button is gated in the UI; the backend guard is the
+        // authority. Both PATCH (soft close) and DELETE (hard delete) are
+        // owner-scoped, so a non-owner gets 404 — never a silent success.
+        $this->actingAs($intruder)
+            ->patchJson("/api/listings/{$listing->id}", ['status' => 'closed'])
+            ->assertNotFound();
+
+        $this->actingAs($intruder)
+            ->deleteJson("/api/listings/{$listing->id}")
+            ->assertNotFound();
+
+        $fresh = $listing->fresh();
+        $this->assertSame('active', $fresh->status);
+        $this->assertTrue($fresh->is_active);
+    }
+
     public function test_paid_listing_requires_a_price(): void
     {
         $owner = $this->member();
