@@ -563,12 +563,6 @@ class ApiService {
         await _request(_dio.patch('/listings/$id', data: payload)) as Map,
       );
 
-  /// Close (soft-delete) a listing owned by the signed-in member.
-  Future<Map<String, dynamic>> deleteListing(int id) async =>
-      Map<String, dynamic>.from(
-        await _request(_dio.delete('/listings/$id')) as Map,
-      );
-
   Future<Map<String, dynamic>> dashboardStats() async =>
       Map<String, dynamic>.from(await _request(_dio.get('/dashboard/stats')) as Map);
 

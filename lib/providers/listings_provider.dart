@@ -130,13 +130,14 @@ class ListingsProvider extends ChangeNotifier {
   }
 
   /// Close (soft-delete) a listing owned by the member, then refresh.
+  ///
+  /// Single code path: PATCH {status:'closed'} is the only write. The old
+  /// DELETE fallback fired on ANY ApiException — including a transient 500
+  /// or a validation 422 — and destroy() hard-deletes the row AND wipes the
+  /// image file from disk, so a failed PATCH turned into an unrecoverable
+  /// listing. A failed close now surfaces as an error instead.
   Future<void> close(int id) async {
-    try {
-      await api.updateListing(id, {'status': 'closed'});
-    } on ApiException {
-      // Fall back to the hard-delete path used by older backends.
-      await api.deleteListing(id);
-    }
+    await api.updateListing(id, {'status': 'closed'});
     await load();
   }
 

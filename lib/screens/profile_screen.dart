@@ -146,7 +146,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final user = auth.user;
-    final mine = context.watch<ListingsProvider>().listings.where((l) => l.owner == (user?.name ?? '')).toList();
+    final mine = context.watch<ListingsProvider>().listings.where((l) => l.ownerId == (user?.id ?? 0)).toList();
     final dark = Theme.of(context).brightness == Brightness.dark;
     return ListView(padding: const EdgeInsets.all(16), children: [
       WelcomeHeader(name: user?.name ?? 'member', subtitle: user?.email ?? ''),

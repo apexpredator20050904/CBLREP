@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../core/api_service.dart';
 import '../core/feedback.dart';
 import '../models/models.dart';
+import '../providers/auth_provider.dart';
 import '../providers/listings_provider.dart';
 import '../theme/cblrep_theme.dart';
 import 'chat_screen.dart';
@@ -132,6 +133,11 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     final listing = widget.listing;
     final need = listing.type == 'request';
     final dark = Theme.of(context).brightness == Brightness.dark;
+    // Owner-only affordances: "Close my listing" and the self-message guard.
+    // The backend enforces both (404 on PATCH/DELETE, 422 on self-chat), but
+    // the UI must not offer actions that can only fail.
+    final myId = context.select<AuthProvider, int?>((p) => p.user?.id);
+    final isOwner = myId != null && listing.ownerId == myId;
     return Scaffold(
       backgroundColor: dark ? CblrepColors.deepForest : null,
       appBar: AppBar(title: const Text('Item details', style: TextStyle(fontSize: 16))),
@@ -196,29 +202,33 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
         // Primary action: open the direct-inquiry chat about this listing.
         // This is the Facebook-Marketplace-style negotiation channel and works
         // for every compensation type (claim a gift, arrange a trade, or buy).
-        SizedBox(
-          height: 48,
-          width: double.infinity,
-          child: FilledButton.icon(
-            onPressed: _messageOwner,
-            icon: const Icon(Icons.chat_bubble_outline, size: 18),
-            label: Text(_inquireLabel),
+        // Hidden for the owner — you cannot message yourself.
+        if (!isOwner) ...[
+          SizedBox(
+            height: 48,
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: _messageOwner,
+              icon: const Icon(Icons.chat_bubble_outline, size: 18),
+              label: Text(_inquireLabel),
+            ),
           ),
-        ),
-        const SizedBox(height: 8),
-        // One-tap negotiation: opens the same thread with a tailored opener,
-        // so members skip the rigid proposal forms entirely.
-        SizedBox(
-          height: 44,
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: _inquireWithOpening,
-            icon: const Icon(Icons.auto_awesome, size: 16),
-            label: const Text('Start a negotiation'),
+          const SizedBox(height: 8),
+          // One-tap negotiation: opens the same thread with a tailored opener,
+          // so members skip the rigid proposal forms entirely.
+          SizedBox(
+            height: 44,
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _inquireWithOpening,
+              icon: const Icon(Icons.auto_awesome, size: 16),
+              label: const Text('Start a negotiation'),
+            ),
           ),
-        ),
-        const SizedBox(height: 8),
-        SizedBox(height: 42, width: double.infinity, child: OutlinedButton(onPressed: _close, child: const Text('Close my listing'))),
+          const SizedBox(height: 8),
+        ],
+        if (isOwner)
+          SizedBox(height: 42, width: double.infinity, child: OutlinedButton(onPressed: _close, child: const Text('Close my listing'))),
       ]),
     );
   }

@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
+import 'package:untitled1/core/api_service.dart';
 import 'package:untitled1/models/models.dart';
+import 'package:untitled1/providers/auth_provider.dart';
+import 'package:untitled1/providers/listings_provider.dart';
 import 'package:untitled1/screens/listing_detail_screen.dart';
 import 'package:untitled1/theme/cblrep_theme.dart';
 import 'package:untitled1/widgets/listing_card.dart';
@@ -41,6 +45,24 @@ Widget _host(ListingModel listing, double width) => MaterialApp(
             child: ListingCard(listing: listing),
           ),
         ),
+      ),
+    );
+
+/// Detail-screen host. ListingDetailScreen reads the signed-in member from
+/// AuthProvider, so these tests must supply one — a bare MaterialApp makes
+/// `context.select<AuthProvider, …>` throw.
+Widget _detailHost(ListingModel listing) => MultiProvider(
+      providers: [
+        ChangeNotifierProvider<AuthProvider>(
+          create: (_) => AuthProvider(ApiService.instance),
+        ),
+        ChangeNotifierProvider<ListingsProvider>(
+          create: (_) => ListingsProvider(ApiService.instance),
+        ),
+      ],
+      child: MaterialApp(
+        theme: CblrepTheme.lightCream,
+        home: ListingDetailScreen(listing: listing),
       ),
     );
 
@@ -93,10 +115,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
 
-      await tester.pumpWidget(MaterialApp(
-        theme: CblrepTheme.lightCream,
-        home: ListingDetailScreen(listing: _hostile()),
-      ));
+      await tester.pumpWidget(_detailHost(_hostile()));
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);
@@ -105,10 +124,7 @@ void main() {
 
     testWidgets('needs/offers and compensation badges do not collide',
         (tester) async {
-      await tester.pumpWidget(MaterialApp(
-        theme: CblrepTheme.lightCream,
-        home: ListingDetailScreen(listing: _hostile(type: 'request', compensation: 'free')),
-      ));
+      await tester.pumpWidget(_detailHost(_hostile(type: 'request', compensation: 'free')));
       await tester.pumpAndSettle();
 
       expect(find.text('NEED'), findsOneWidget);
