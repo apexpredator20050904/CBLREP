@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../config/api_config.dart';
 import 'input_sanitizer.dart';
 
 class ApiException implements Exception {
@@ -22,7 +23,7 @@ class ApiService {
   static const _tokenKey = 'cblrep_member_token';
 
   // ── API base URL resolution ──────────────────────────────────────────────
-  // The production URL is supplied at BUILD time and never hardcoded:
+  // The production URL is supplied at BUILD time and is never hardcoded:
   //
   //   flutter build apk --release \
   //     --dart-define=CBLREP_API_URL=https://your-api-host.com/api
@@ -30,11 +31,17 @@ class ApiService {
   // The value is baked into the binary by the Dart compiler, so a shipped APK
   // always talks to exactly the host it was built for.
   //
-  // In release builds a missing CBLREP_API_URL is a hard configuration error:
-  // the emulator/LAN/localhost candidates are dev-only and are NOT compiled
-  // into a release APK, because `baseUrlCandidates` is built from
-  // `kReleaseMode` at the top level (see [releaseConfigError]).
-  static const _envBaseUrl = String.fromEnvironment('CBLREP_API_URL');
+  // When the define is absent, [kCblrepApiUrlFallback]
+  // (`lib/config/api_config.dart`) is used instead — a single, easily edited
+  // line that keeps a plain release build reachable. An *unedited* placeholder
+  // is treated as "not configured": the emulator/LAN/localhost candidates are
+  // dev-only and are NOT compiled into a release APK, because
+  // `baseUrlCandidates` is built from `kReleaseMode` at the top level (see
+  // [releaseConfigError]).
+  static const _envBaseUrl = String.fromEnvironment(
+    'CBLREP_API_URL',
+    defaultValue: kCblrepApiUrlFallback,
+  );
 
   /// Set for every debug/profile run so the dev helpers below can tell a
   /// release build (production host only) from a local one.
@@ -42,15 +49,25 @@ class ApiService {
 
   // Dev-only overrides — ignored entirely by release builds.
   static const _envLanIp = String.fromEnvironment('CBLREP_LAN_IP',
-      defaultValue: '192.168.1.74');
+      defaultValue: '192.168.0.231');
   static const _envPort = String.fromEnvironment('CBLREP_API_PORT', defaultValue: '8000');
+
+  /// The configured production origin, or empty when nothing usable was
+  /// supplied. An absent `--dart-define` and an unedited placeholder both
+  /// resolve to "" so the release guard below still fires.
+  static String get _productionBaseUrl {
+    final value = _normalise(_envBaseUrl);
+    return value == _normalise(kCblrepApiUrlPlaceholder) ? '' : value;
+  }
 
   /// Human-readable reason a release build cannot reach the API, or `null`
   /// when the build is correctly configured.
   static String? get releaseConfigError =>
-      (_isReleaseBuild && _normalise(_envBaseUrl).isEmpty)
-          ? 'CBLREP_API_URL was not set at build time. Rebuild with '
-              '--dart-define=CBLREP_API_URL=https://your-api-host.com/api'
+      (_isReleaseBuild && _productionBaseUrl.isEmpty)
+          ? 'CBLREP_API_URL was not set at build time and the fallback in '
+              'lib/config/api_config.dart is still the placeholder. Rebuild with '
+              '--dart-define=CBLREP_API_URL=https://your-api-host.com/api '
+              '(a trailing "/api" is optional).'
           : null;
 
   /// Strips trailing slashes and a trailing `/api` so the value can be used
@@ -78,7 +95,7 @@ class ApiService {
   ///   iOS simulator    → http://127.0.0.1:8000/api    (shares the host network)
   ///   adb reverse      → http://127.0.0.1:8000/api    (after `adb reverse`)
   static List<String> get baseUrlCandidates {
-    final production = _normalise(_envBaseUrl);
+    final production = _productionBaseUrl;
     if (production.isNotEmpty) {
       if (_isReleaseBuild) return ['$production/api'];
       final lanIp = _devLanCandidate();
@@ -142,6 +159,16 @@ class ApiService {
     if (uri == null || uri.host.isEmpty) return _activeBaseUrl;
     final port = uri.hasPort ? ':${uri.port}' : '';
     return '${uri.host}$port';
+  }
+
+  /// Points the client at a stub server for tests that need to control the
+  /// wire (ordering of replies, headers actually sent) instead of talking to
+  /// the real backend. A release build still only ever has the host it was
+  /// built with in [baseUrlCandidates], so this cannot redirect a shipped APK.
+  @visibleForTesting
+  void setBaseUrlForTesting(String url) {
+    _activeBaseUrl = url;
+    _dio.options.baseUrl = url;
   }
 
   /// Fires once when the server rejects the stored token (401). [AuthProvider]
@@ -246,12 +273,29 @@ class ApiService {
         final path = error.requestOptions.path;
         final isAuthAttempt = path.endsWith('/login') || path.endsWith('/register');
         if (status == 401 && !isAuthAttempt) {
-          // Token expired/revoked — drop it so AuthGate returns to login and
-          // tell the app layer, otherwise the member is left staring at a
-          // dashboard whose every request is about to fail.
-          _dio.options.headers.remove('Authorization');
-          unawaited(clearToken());
-          if (!_sessionExpired.isClosed) _sessionExpired.add(null);
+          // ONLY tear the session down when this answer belongs to the token
+          // the client is holding right now.
+          //
+          // Dio replies whenever the network delivers them, so a request
+          // issued BEFORE the member signed in (a live-hub poll still in
+          // flight, a fail-over retry from _recover) can land AFTER the fresh
+          // token was applied. Its 401 is about an old, token-less request —
+          // reading it as "the session is dead" used to drop the Authorization
+          // header and wipe the brand-new token, leaving a member who had just
+          // signed in looking signed in while every authenticated call,
+          // Message / Inquire included, went out with no token and came back
+          // "Unauthenticated."
+          final sentAuth = error.requestOptions.headers['Authorization'];
+          final currentAuth = _dio.options.headers['Authorization'];
+          final isCurrentSession = currentAuth != null && sentAuth == currentAuth;
+          if (isCurrentSession) {
+            // Token expired/revoked — drop it so AuthGate returns to login and
+            // tell the app layer, otherwise the member is left staring at a
+            // dashboard whose every request is about to fail.
+            _dio.options.headers.remove('Authorization');
+            unawaited(clearToken());
+            if (!_sessionExpired.isClosed) _sessionExpired.add(null);
+          }
         }
         handler.next(error);
       },
@@ -364,7 +408,7 @@ class ApiService {
 
   /// Names the host the app actually tried, so "can't reach the server" is
   /// actionable instead of vague: the member sees whether they are pointed at
-  /// 192.168.1.81 (PC on the same Wi-Fi) or a deployed API.
+  /// 192.168.0.231 (PC on the same Wi-Fi) or a deployed API.
   String _connectivityHint() {
     final host = baseUrlHost;
     return "Unable to connect to the CBLREP server at $host. "
@@ -388,7 +432,22 @@ class ApiService {
         }
       }
     }
-    if (serverMessage != null) return ApiException(serverMessage, error.response?.statusCode);
+    if (serverMessage != null) {
+      final status = error.response?.statusCode;
+      // Laravel's bare 401 body is "Unauthenticated." — a server-side phrase
+      // that tells a member nothing they can act on. Sign-in failures keep
+      // their own message (it belongs to the form); every other 401 means the
+      // session is no longer accepted, so say that instead.
+      final isAuthAttempt = error.requestOptions.path.endsWith('/login') ||
+          error.requestOptions.path.endsWith('/register');
+      if (status == 401 && !isAuthAttempt) {
+        return const ApiException(
+          'Your session has expired. Please sign in again.',
+          401,
+        );
+      }
+      return ApiException(serverMessage, status);
+    }
 
     switch (error.type) {
       case DioExceptionType.connectionTimeout:
