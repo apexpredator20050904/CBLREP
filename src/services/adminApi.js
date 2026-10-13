@@ -5,8 +5,8 @@
 //
 // When VITE_API_BASE_URL is unset (the default), relative `/api/*` paths are
 // forwarded by the Vite dev-server proxy to the Laravel backend (see
-// vite.config.js). When it is set to the LAN origin (e.g.
-// http://192.168.0.231:8000), requests go straight to Laravel and CORS applies.
+// vite.config.js). When it is set to an API origin (e.g.
+// https://api.your-domain.com), requests go straight to Laravel and CORS applies.
 // Auth model: Sanctum bearer tokens in localStorage (see AuthContext).
 // ─────────────────────────────────────────────────────────────
 import axios from "axios";

@@ -39,7 +39,7 @@ export const TRINIDAD_BARANGAYS = [
 // while developing — including when a phone loads the app from the dev server
 // over the LAN at http://<PC-IP>:5173.
 //
-// Set VITE_API_BASE_URL in frontend/.env (e.g. http://192.168.0.231:8000) to
+// Set VITE_API_BASE_URL in frontend/.env (e.g. https://api.your-domain.com) to
 // call the Laravel API directly instead. Required for a production build
 // served from a static host such as Vercel; Laravel CORS must allow that
 // origin (backend/config/cors.php). The value is inlined at build time, so
