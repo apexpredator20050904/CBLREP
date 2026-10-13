@@ -1,0 +1,90 @@
+/* Tailwind v4 entry for the CBLRE admin console. */
+@import "tailwindcss";
+
+html.dark body {
+  background: #0f2415;
+}
+
+html.dark main {
+  background: #102719;
+  color: #e5f3e8;
+}
+
+/* Page shell (sits outside <main>) must follow the dark theme too. */
+html.dark .bg-\[\#f8fafc\] {
+  background: #0f2415;
+  color: #e5f3e8;
+}
+
+html.dark .bg-white {
+  background: #17351f;
+  border-color: #2e5a39;
+}
+
+html.dark .bg-stone-50,
+html.dark .bg-stone-100,
+html.dark .bg-gray-100 {
+  background: #142d1b;
+}
+
+html.dark .bg-emerald-50,
+html.dark .bg-emerald-100 {
+  background: #17351f;
+}
+
+html.dark .text-emerald-950,
+html.dark .text-emerald-900,
+html.dark .text-emerald-800,
+html.dark .text-emerald-700,
+html.dark .text-stone-800,
+html.dark .text-stone-700,
+html.dark .text-stone-600 {
+  color: #e5f3e8;
+}
+
+html.dark .text-stone-500,
+html.dark .text-stone-400,
+html.dark .text-stone-300,
+html.dark .text-gray-400 {
+  color: #a8c5ae;
+}
+
+html.dark .border-stone-100,
+html.dark .border-stone-200,
+html.dark .border-stone-300,
+html.dark .border-gray-200,
+html.dark .border-emerald-200 {
+  border-color: #2e5a39;
+}
+
+/* Keep inputs and tables readable inside dark cards. */
+html.dark input,
+html.dark select,
+html.dark textarea {
+  background: #142d1b;
+  color: #e5f3e8;
+  border-color: #2e5a39;
+}
+
+/* Keep Leaflet tiles readable when the admin console is in dark mode. */
+html.dark .leaflet-tile-pane {
+  filter: invert(92%) hue-rotate(180deg) brightness(0.85) contrast(0.95);
+}
+
+html.dark .leaflet-container {
+  background: #102719;
+}
+
+html.dark table thead th {
+  color: #a8c5ae;
+}
+
+html.dark table tbody td {
+  color: #e5f3e8;
+}
+
+html.dark tr:hover,
+html.dark .hover\:bg-stone-50:hover,
+html.dark .hover\:bg-emerald-50:hover {
+  background: #1c4227;
+}
