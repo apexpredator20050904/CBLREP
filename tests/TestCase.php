@@ -39,7 +39,7 @@ abstract class TestCase extends BaseTestCase
         if (! self::database_reachable()) {
             $this->markTestSkipped(
                 'Database unreachable ('.self::database_label().'). '
-                .'Check the DB_* values in backend/phpunit.xml.'
+                .'Check the DB_* values in backend/.env.'
             );
         }
 
@@ -55,11 +55,17 @@ abstract class TestCase extends BaseTestCase
             return $reachable;
         }
 
-        $host = getenv('DB_HOST') ?: '127.0.0.1';
-        $port = getenv('DB_PORT') ?: '3306';
-        $database = getenv('DB_DATABASE') ?: '';
-        $username = getenv('DB_USERNAME') ?: '';
-        $password = (string) (getenv('DB_PASSWORD') ?: '');
+        // The DB password is intentionally absent from phpunit.xml (it is a
+        // secret and used to be committed there). When PHPUnit has not put it
+        // into the process environment, fall back to the application's own
+        // .env / .env.testing so a plain `php artisan test` still connects.
+        self::load_application_env();
+
+        $host = self::env_value('DB_HOST') ?: '127.0.0.1';
+        $port = self::env_value('DB_PORT') ?: '3306';
+        $database = self::env_value('DB_DATABASE');
+        $username = self::env_value('DB_USERNAME');
+        $password = self::env_value('DB_PASSWORD');
 
         if ($database === ':memory:') {
             return $reachable = true;
@@ -80,14 +86,52 @@ abstract class TestCase extends BaseTestCase
         return $reachable;
     }
 
+    /**
+     * Loads .env.testing / .env into $_ENV and $_SERVER without overriding
+     * anything PHPUnit already set (APP_ENV=testing, DB_HOST, ...). Mirrors
+     * the framework's own bootstrap just early enough for the PDO probe.
+     */
+    private static function load_application_env(): void
+    {
+        static $loaded = false;
+
+        if ($loaded) {
+            return;
+        }
+
+        $loaded = true;
+        $base = dirname(__DIR__);
+        $file = is_file($base.'/.env.testing') ? '.env.testing' : '.env';
+
+        if (is_file($base.'/'.$file) && class_exists(\Dotenv\Dotenv::class)) {
+            try {
+                \Dotenv\Dotenv::createImmutable($base, $file)->safeLoad();
+            } catch (\Throwable) {
+                // Fall through: the probe reports unreachable with a clear note.
+            }
+        }
+    }
+
+    /** Reads an env value from the process env, then the loaded $_ENV/$_SERVER. */
+    private static function env_value(string $key): string
+    {
+        foreach ([getenv($key), $_ENV[$key] ?? null, $_SERVER[$key] ?? null] as $value) {
+            if (is_string($value) && $value !== '') {
+                return $value;
+            }
+        }
+
+        return '';
+    }
+
     private static function database_label(): string
     {
         return sprintf(
             '%s:%s/%s as %s',
-            getenv('DB_HOST') ?: '127.0.0.1',
-            getenv('DB_PORT') ?: '3306',
-            getenv('DB_DATABASE') ?: '(unset)',
-            getenv('DB_USERNAME') ?: '(unset)',
+            self::env_value('DB_HOST') ?: '127.0.0.1',
+            self::env_value('DB_PORT') ?: '3306',
+            self::env_value('DB_DATABASE') ?: '(unset)',
+            self::env_value('DB_USERNAME') ?: '(unset)',
         );
     }
 

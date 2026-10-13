@@ -63,7 +63,6 @@
         <env name="DB_PORT" value="3306"/>
         <env name="DB_DATABASE" value="community-based-portal"/>
         <env name="DB_USERNAME" value="cblrep"/>
-        <env name="DB_PASSWORD" value="cblrep_dev_2026"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
