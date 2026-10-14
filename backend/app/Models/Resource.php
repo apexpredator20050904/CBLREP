@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -154,6 +155,20 @@ class Resource extends Model
     public function isPubliclyVisible(): bool
     {
         return $this->statusKey() === self::ACTIVE && (bool) $this->is_active;
+    }
+
+    /**
+     * Query twin of [isPubliclyVisible]: the rows the public feed is allowed to
+     * return.
+     *
+     * Defined once, on the model, so the feed query and anything that asserts
+     * against it (see PublicListingsFeedTest) cannot drift apart. A "baseline"
+     * that counts a different set of rows than the feed returns is exactly how
+     * a feed test starts failing for reasons unrelated to the feed.
+     */
+    public function scopePubliclyVisible(Builder $query): Builder
+    {
+        return $query->where('is_active', true)->where('status', self::ACTIVE);
     }
 
     public function statusLabel(): string

@@ -61,6 +61,20 @@ class PublicListingsFeedTest extends TestCase
         ));
     }
 
+    /**
+     * Rows the public feed is expected to return.
+     *
+     * Uses the very same rule the feed applies (Resource::publiclyVisible())
+     * rather than the raw row count. Counting every row instead included
+     * archived/closed leftovers in the shared development database, so the
+     * baseline was higher than what the feed actually yielded and the
+     * assertions below failed for reasons unrelated to the feed.
+     */
+    private function feedBaseline(): int
+    {
+        return Resource::publiclyVisible()->count();
+    }
+
     public function test_the_feed_is_paginated_and_reports_meta(): void
     {
         $this->seedListings(45);
@@ -68,7 +82,7 @@ class PublicListingsFeedTest extends TestCase
         $response = $this->getJson('/api/listings')->assertOk();
 
         $this->assertCount(30, $response->json('listings'), 'Default page size is 30.');
-        $this->assertSame($this->baseline('resources'), $response->json('meta.total'));
+        $this->assertSame($this->feedBaseline(), $response->json('meta.total'));
         $this->assertGreaterThan(1, $response->json('meta.last_page'));
         $this->assertTrue($response->json('meta.has_more'));
     }
@@ -87,7 +101,7 @@ class PublicListingsFeedTest extends TestCase
     public function test_paging_walks_the_whole_result_set_without_repeats(): void
     {
         $ids = $this->seedListings(45);
-        $before = $this->baseline('resources') - 45;
+        $before = $this->feedBaseline() - 45;
 
         $seen = [];
         $page = 1;
