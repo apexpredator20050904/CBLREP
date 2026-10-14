@@ -120,6 +120,11 @@ class User extends Authenticatable
         return $this->hasMany(MemberNotification::class);
     }
 
+    public function deviceTokens()
+    {
+        return $this->hasMany(DeviceToken::class);
+    }
+
     // ------------------------------------------------------------------
     // Helpers used by the admin controllers
     // ------------------------------------------------------------------

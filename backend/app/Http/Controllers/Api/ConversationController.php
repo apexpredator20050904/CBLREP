@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Conversation;
+use App\Models\MemberNotification;
 use App\Models\Message;
 use App\Models\Resource;
 use App\Models\User;
+use App\Services\PushService;
 use Illuminate\Http\Request;
 
 /**
@@ -121,16 +123,7 @@ class ConversationController extends Controller
         $recipientId = $conversation->participant_one_id === $request->user()->id
             ? $conversation->participant_two_id
             : $conversation->participant_one_id;
-        \App\Models\MemberNotification::create([
-            'user_id' => $recipientId,
-            'type' => 'message',
-            'title' => 'New message from '.$request->user()->name,
-            'body' => $body !== '' ? $body : ('Sent an attachment'.(isset($attachment['file_name']) ? ': '.$attachment['file_name'] : '')),
-            'data' => [
-                'conversation_id' => $conversation->id,
-                'listing_id' => $conversation->listing_id,
-            ],
-        ]);
+        $this->notifyRecipient($conversation, $request->user(), $recipientId, $body, $attachment);
 
         return response()->json(['message' => $message->fresh('sender')->toChatPayload()], 201);
     }
@@ -280,18 +273,46 @@ class ConversationController extends Controller
         $recipientId = $conversation->participant_one_id === $request->user()->id
             ? $conversation->participant_two_id
             : $conversation->participant_one_id;
-        \App\Models\MemberNotification::create([
+        $this->notifyRecipient($conversation, $request->user(), $recipientId, $body, $attachment);
+
+        return response()->json(['message' => $message->fresh('sender')->toChatPayload()], 201);
+    }
+
+    /**
+     * Records the in-app notification for a new chat message and best-effort
+     * pushes it to the recipient's devices.
+     *
+     * The `member_notifications` row is the source of truth (the mobile inbox
+     * and the admin console read it); the FCM push is an enhancement that never
+     * throws, so a push outage cannot break messaging.
+     */
+    private function notifyRecipient(
+        Conversation $conversation,
+        User $sender,
+        int $recipientId,
+        string $body,
+        array $attachment,
+    ): void {
+        $preview = $body !== ''
+            ? $body
+            : ('Sent an attachment'.(isset($attachment['file_name']) ? ': '.$attachment['file_name'] : ''));
+        $title = 'New message from '.$sender->name;
+
+        MemberNotification::create([
             'user_id' => $recipientId,
             'type' => 'message',
-            'title' => 'New message from '.$request->user()->name,
-            'body' => $body !== '' ? $body : ('Sent an attachment'.(isset($attachment['file_name']) ? ': '.$attachment['file_name'] : '')),
+            'title' => $title,
+            'body' => $preview,
             'data' => [
                 'conversation_id' => $conversation->id,
                 'listing_id' => $conversation->listing_id,
             ],
         ]);
 
-        return response()->json(['message' => $message->fresh('sender')->toChatPayload()], 201);
+        app(PushService::class)->sendToUser($recipientId, $title, $preview, [
+            'type' => 'message',
+            'conversation_id' => (string) $conversation->id,
+        ]);
     }
 
     /**

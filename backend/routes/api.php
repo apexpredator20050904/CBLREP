@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ContentAdminController;
 use App\Http\Controllers\Api\ConversationController;
 use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\DeviceTokenController;
 use App\Http\Controllers\Api\ExchangeController;
 use App\Http\Controllers\Api\ListingController;
 use App\Http\Controllers\Api\NotificationController;
@@ -150,6 +151,11 @@ Route::middleware('auth:sanctum')->group(function () {
     // Member announcements and action notifications.
     Route::get('/notifications', [NotificationController::class, 'index']);
     Route::put('/notifications/{id}/read', [NotificationController::class, 'read']);
+
+    // FCM device tokens. The mobile app registers its token after sign-in and
+    // removes it on sign-out so a signed-out device stops receiving pushes.
+    Route::post('/device-tokens', [DeviceTokenController::class, 'store']);
+    Route::delete('/device-tokens', [DeviceTokenController::class, 'destroy']);
 
     /*
      * Admin portal — endpoints consumed by frontend/src/admin pages.

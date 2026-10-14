@@ -29,4 +29,17 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Firebase Cloud Messaging (push notifications)
+    |--------------------------------------------------------------------------
+    | `credentials` is the absolute path to the service-account JSON downloaded
+    | from the Firebase console (Project settings → Service accounts). It must
+    | live OUTSIDE version control — see backend/.gitignore.
+    */
+    'firebase' => [
+        'credentials' => env('FIREBASE_CREDENTIALS'),
+        'project_id' => env('FIREBASE_PROJECT_ID'),
+    ],
+
 ];
