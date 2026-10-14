@@ -836,4 +836,9 @@ class ApiService {
 
   Future<Map<String, dynamic>> platformStatus() async =>
       Map<String, dynamic>.from(await _request(_dio.get('/platform/status')) as Map);
+
+  /// Release metadata for the in-app updater (see AppVersionController).
+  /// Public endpoint — no token required.
+  Future<Map<String, dynamic>> appVersion() async =>
+      Map<String, dynamic>.from(await _request(_dio.get('/app-version')) as Map);
 }

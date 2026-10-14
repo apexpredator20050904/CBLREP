@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_settings_provider.dart';
+import '../providers/app_update_provider.dart';
 import '../providers/auth_provider.dart';
 import '../theme/cblrep_theme.dart';
+import '../widgets/update_prompt.dart';
 
 /// Professional Settings — appearance, notifications, account, app info.
 class SettingsScreen extends StatelessWidget {
@@ -12,6 +14,7 @@ class SettingsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final settings = context.watch<AppSettingsProvider>();
     final auth = context.watch<AuthProvider>();
+    final update = context.watch<AppUpdateProvider>();
     final dark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       backgroundColor: dark ? CblrepColors.deepForest : null,
@@ -77,15 +80,55 @@ class SettingsScreen extends StatelessWidget {
             ),
           ]),
           _section(context, 'About CBLREP', [
-            const ListTile(
-              leading: Icon(Icons.info_outline),
-              title: Text('Community-Based Local Resources Exchange Portal'),
-              subtitle: Text('Trinidad, Bohol · v1.0.0+1\nFree · Barter · Paid — 20 official barangays'),
+            ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('Community-Based Local Resources Exchange Portal'),
+              subtitle: Text(
+                'Trinidad, Bohol · v${update.installedLabel}\n'
+                'Free · Barter · Paid — 20 official barangays',
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.system_update_alt),
+              title: const Text('Check for updates'),
+              subtitle: Text(_updateSubtitle(update)),
+              trailing: update.checking
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.chevron_right),
+              onTap: update.checking ? null : () => _checkForUpdates(context, update),
             ),
           ]),
         ],
       ),
     );
+  }
+
+  String _updateSubtitle(AppUpdateProvider update) {
+    if (update.checking) return 'Checking…';
+    if (update.error != null) return update.error!;
+    if (update.updateAvailable) return 'Version ${update.latestVersionName} is available';
+    if (update.checked) return 'You are on the latest version';
+    return 'Tap to check for a newer build';
+  }
+
+  Future<void> _checkForUpdates(BuildContext context, AppUpdateProvider update) async {
+    final messenger = ScaffoldMessenger.of(context);
+    await update.check();
+    if (!context.mounted) return;
+
+    if (update.error != null) {
+      messenger.showSnackBar(SnackBar(content: Text(update.error!)));
+      return;
+    }
+    if (update.updateAvailable) {
+      await showUpdatePromptDialog(context, update);
+      return;
+    }
+    messenger.showSnackBar(const SnackBar(content: Text('CBLREP is up to date.')));
   }
 
   Widget _section(BuildContext context, String title, List<Widget> children) {
