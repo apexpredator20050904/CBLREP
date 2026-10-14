@@ -20,10 +20,10 @@ class ListingController extends Controller
     public function index(Request $request)
     {
         $query = Resource::with(['user', 'category'])
-            ->where('is_active', true)
-            // Belt and braces: a paused/traded/archived listing must never leak
-            // into the feed even if `is_active` drifted out of step.
-            ->where('status', Resource::ACTIVE)
+            // The feed's visibility rule (active AND not moderated) lives on the
+            // model so this query and the tests that assert against it cannot
+            // drift apart.
+            ->publiclyVisible()
             ->latest();
 
         if ($barangay = trim((string) $request->query('barangay', ''))) {
