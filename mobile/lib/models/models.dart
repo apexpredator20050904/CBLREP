@@ -7,6 +7,14 @@ double? _asDouble(dynamic v) {
   return null;
 }
 
+/// Canonical listing status. The API already normalises the legacy "closed"
+/// word to "archived"; this mirrors that so an older payload cannot introduce
+/// a status the client does not understand.
+String _listingStatus(dynamic raw) {
+  final value = '${raw ?? 'active'}';
+  return value == 'closed' ? 'archived' : value;
+}
+
 /// Rewrite the image URL's origin to the API host the app is actually
 /// talking to, so photos load no matter which base-URL candidate won
 /// (LAN IP, emulator alias, or adb reverse) and regardless of APP_URL.
@@ -115,6 +123,11 @@ class ListingModel {
   final int ownerId;
   final String? imageUrl;
   final bool active;
+
+  /// Canonical lifecycle status: active | paused | traded | archived, or an
+  /// admin hold (flagged | hidden | removed). Distinct from [active], which is
+  /// the derived "visible in the community feed" flag.
+  final String status;
   final double? latitude;
   final double? longitude;
 
@@ -136,6 +149,7 @@ class ListingModel {
     required this.ownerId,
     this.imageUrl,
     required this.active,
+    this.status = 'active',
     this.latitude,
     this.longitude,
   });
@@ -143,6 +157,28 @@ class ListingModel {
   bool get isFree => compensationType == 'free';
   bool get isPaid => compensationType == 'paid';
   bool get isBarter => !isFree && !isPaid;
+
+  // ── Lifecycle status ─────────────────────────────────────────────────
+  bool get isActiveStatus => status == 'active';
+  bool get isPaused => status == 'paused';
+  bool get isTraded => status == 'traded';
+  bool get isArchived => status == 'archived';
+
+  /// Held back by a moderator — the owner cannot change it.
+  bool get underReview =>
+      status == 'flagged' || status == 'hidden' || status == 'removed';
+
+  /// Human label for the "My Listings" status badge.
+  String get statusLabel => const {
+        'active': 'Active',
+        'paused': 'Paused',
+        'traded': 'Traded',
+        'archived': 'Archived',
+        'flagged': 'Under review',
+        'hidden': 'Under review',
+        'removed': 'Removed',
+      }[status] ??
+      status;
 
   /// True when the owner named what they want back. Barter-only: free and paid
   /// listings have no return side, so a stale payload cannot surface one.
@@ -174,6 +210,7 @@ class ListingModel {
           : (json['user_id'] as num?)?.toInt() ?? 0,
       imageUrl: _resolveImageUrl(json['image_url'] as String?),
       active: json['is_active'] != false,
+      status: _listingStatus(json['status']),
       latitude: _asDouble(json['latitude']),
       longitude: _asDouble(json['longitude']),
     );

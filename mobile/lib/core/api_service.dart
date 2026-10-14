@@ -627,6 +627,20 @@ class ApiService {
         await _request(_dio.patch('/listings/$id', data: payload)) as Map,
       );
 
+  /// GET /api/my-listings — the member's own listings, including the paused,
+  /// traded and archived rows the public feed never returns. Returns the whole
+  /// payload (`listings` + `counts`) so the UI can render tab totals.
+  Future<Map<String, dynamic>> myListings() async => Map<String, dynamic>.from(
+        await _request(_dio.get('/my-listings')) as Map,
+      );
+
+  /// DELETE /api/listings/{id} — archives the listing. Nothing is destroyed:
+  /// the row and photo survive so the owner can restore it.
+  Future<Map<String, dynamic>> archiveListing(int id) async =>
+      Map<String, dynamic>.from(
+        await _request(_dio.delete('/listings/$id')) as Map,
+      );
+
   Future<Map<String, dynamic>> dashboardStats() async =>
       Map<String, dynamic>.from(await _request(_dio.get('/dashboard/stats')) as Map);
 

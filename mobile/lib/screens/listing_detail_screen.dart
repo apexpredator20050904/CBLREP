@@ -12,7 +12,8 @@ import 'chat_screen.dart';
 import 'login_screen.dart';
 
 /// Item details — full listing info, the owner's return wish, one chat entry
-/// point, a barter trade-offer form, and manage (close) for owners.
+/// point, a barter trade-offer form, and the owner's lifecycle controls
+/// (pause / resume / mark traded / archive).
 class ListingDetailScreen extends StatefulWidget {
   final ListingModel listing;
   const ListingDetailScreen({super.key, required this.listing});
@@ -24,24 +25,54 @@ class ListingDetailScreen extends StatefulWidget {
 class _ListingDetailScreenState extends State<ListingDetailScreen> {
   bool busy = false;
 
-  Future<void> _close() async {
+  /// Move this listing to a new lifecycle state.
+  ///
+  /// Nothing is ever destroyed: pause hides it (reversible), traded records a
+  /// completed swap, archive files it away. That is why the words are "pause"
+  /// and "archive", never "delete". A listing a moderator has held back is
+  /// read-only for the owner, and the API refuses the write (403).
+  Future<void> _setStatus(String status) async {
+    final title = switch (status) {
+      'paused' => 'Pause',
+      'active' => 'Resume',
+      'traded' => 'Mark as traded',
+      'archived' => 'Archive',
+      _ => 'Update',
+    };
+    final done = switch (status) {
+      'paused' => 'paused',
+      'active' => 'resumed',
+      'traded' => 'marked as traded',
+      'archived' => 'archived',
+      _ => 'updated',
+    };
     final confirm = await Feedback.confirm(
       context,
-      title: 'Close listing?',
-      message: 'Close "${widget.listing.title}" so members stop seeing it? '
-          'This cannot be undone.',
-      confirmLabel: 'Close listing',
-      danger: true,
+      title: '$title listing?',
+      message: switch (status) {
+        'paused' =>
+          'Hide "${widget.listing.title}" from the feed? You can resume it anytime.',
+        'active' => '"${widget.listing.title}" will show in the community feed again.',
+        'traded' =>
+          'Mark "${widget.listing.title}" as traded? It moves to your Traded list.',
+        'archived' =>
+          '"${widget.listing.title}" moves to your archive. You can restore it anytime.',
+        _ => '"${widget.listing.title}" will be updated.',
+      },
+      confirmLabel: title,
+      danger: status == 'archived',
     );
     if (!confirm || !mounted) return;
     setState(() => busy = true);
     try {
-      await context.read<ListingsProvider>().close(widget.listing.id);
+      await context.read<ListingsProvider>().setMyListingStatus(widget.listing.id, status);
       if (!mounted) return;
-      Feedback.success(context, 'Listing closed.');
-      Navigator.pop(context, 'closed');
+      Feedback.success(context, 'Listing $done.');
+      Navigator.pop(context, status);
     } on ApiException catch (e) {
-      if (mounted) Feedback.error(context, e.message, onRetry: _close);
+      if (mounted) {
+        Feedback.error(context, e.message, onRetry: () => _setStatus(status));
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -188,9 +219,10 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     final listing = widget.listing;
     final need = listing.type == 'request';
     final dark = Theme.of(context).brightness == Brightness.dark;
-    // Owner-only affordances: "Close my listing" and the self-message guard.
-    // The backend enforces both (404 on PATCH/DELETE, 422 on self-chat), but
-    // the UI must not offer actions that can only fail.
+    // Owner-only affordances: the lifecycle controls below and the
+    // self-message guard. The backend enforces both (404 on PATCH/DELETE for a
+    // listing you do not own, 403 while a moderator holds it, 422 on
+    // self-chat), but the UI must not offer actions that can only fail.
     final myId = context.select<AuthProvider, int?>((p) => p.user?.id);
     final isOwner = myId != null && listing.ownerId == myId;
     return Scaffold(
@@ -292,11 +324,98 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
           ],
           const SizedBox(height: 8),
         ],
-        if (isOwner)
-          SizedBox(height: 42, width: double.infinity, child: OutlinedButton(onPressed: _close, child: const Text('Close my listing'))),
+        if (isOwner) _ownerPanel(listing, dark),
       ]),
     );
   }
+
+  /// Owner lifecycle controls. Every action here is reversible, and a listing
+  /// a moderator has held is shown read-only rather than with a menu that the
+  /// API would reject.
+  Widget _ownerPanel(ListingModel listing, bool dark) {
+    final muted = dark ? Colors.white70 : Colors.black54;
+
+    if (listing.underReview) {
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: CblrepColors.dangerRed.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: CblrepColors.dangerRed.withValues(alpha: 0.4)),
+        ),
+        child: Row(children: [
+          const Icon(Icons.lock_outline, color: CblrepColors.dangerRed, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'This listing is under review by a moderator, so it is hidden '
+              'from the feed and cannot be changed here.',
+              style: TextStyle(fontSize: 12, color: dark ? Colors.white : Colors.black87),
+            ),
+          ),
+        ]),
+      );
+    }
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: CblrepColors.actionOrange.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            listing.statusLabel,
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: CblrepColors.actionOrange,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(_ownerHint(listing), style: TextStyle(fontSize: 11, color: muted)),
+        ),
+      ]),
+      const SizedBox(height: 10),
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        if (listing.isActiveStatus)
+          OutlinedButton.icon(
+            onPressed: busy ? null : () => _setStatus('paused'),
+            icon: const Icon(Icons.pause_circle_outline, size: 18),
+            label: const Text('Pause'),
+          )
+        else
+          FilledButton.icon(
+            onPressed: busy ? null : () => _setStatus('active'),
+            icon: const Icon(Icons.play_circle_outline, size: 18),
+            label: const Text('Put back in feed'),
+          ),
+        if (!listing.isTraded)
+          OutlinedButton.icon(
+            onPressed: busy ? null : () => _setStatus('traded'),
+            icon: const Icon(Icons.handshake_outlined, size: 18),
+            label: const Text('Mark as traded'),
+          ),
+        if (!listing.isArchived)
+          OutlinedButton.icon(
+            onPressed: busy ? null : () => _setStatus('archived'),
+            icon: const Icon(Icons.archive_outlined, size: 18),
+            label: const Text('Archive'),
+          ),
+      ]),
+    ]);
+  }
+
+  String _ownerHint(ListingModel listing) => switch (listing.status) {
+        'active' => 'Live in the community feed.',
+        'paused' => 'Hidden from the feed. Resume it whenever you are ready.',
+        'traded' => 'Kept as a record of a completed swap.',
+        'archived' => 'Filed away. Restore it to post again.',
+        _ => '',
+      };
 
   /// Icon + label + value row. The label is fixed width so the values line up,
 /// and the value gets the remaining space with an ellipsis — no overlap, ever.

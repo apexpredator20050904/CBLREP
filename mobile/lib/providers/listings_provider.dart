@@ -16,6 +16,13 @@ class ListingsProvider extends ChangeNotifier {
   List<ListingModel> listings = const [];
   bool loading = false;
   String? error;
+
+  /// The signed-in member's own listings, including the paused/traded/archived
+  /// rows the public feed hides. Populated by [loadMine].
+  List<ListingModel> myListings = const [];
+  Map<String, int> myCounts = const <String, int>{};
+  bool myLoading = false;
+
   Timer? _pollTimer;
 
   ListingsProvider(this.api);
@@ -135,17 +142,63 @@ class ListingsProvider extends ChangeNotifier {
     return created;
   }
 
-  /// Close (soft-delete) a listing owned by the member, then refresh.
-  ///
-  /// Single code path: PATCH {status:'closed'} is the only write. The old
-  /// DELETE fallback fired on ANY ApiException — including a transient 500
-  /// or a validation 422 — and destroy() hard-deletes the row AND wipes the
-  /// image file from disk, so a failed PATCH turned into an unrecoverable
-  /// listing. A failed close now surfaces as an error instead.
-  Future<void> close(int id) async {
-    await api.updateListing(id, {'status': 'closed'});
-    await load();
+  /// Load the member's own listings (every lifecycle state) plus per-status
+  /// counts. This is what powers the "My Listings" tabs — the public feed only
+  /// ever returns active listings, so it cannot.
+  Future<void> loadMine({bool showSpinner = true}) async {
+    if (showSpinner) {
+      myLoading = true;
+      notifyListeners();
+    }
+    try {
+      final data = await api.myListings();
+      final raw = List<dynamic>.from(data['listings'] ?? data['data'] ?? const []);
+      myListings = raw
+          .map((item) => ListingModel.fromJson(Map<String, dynamic>.from(item as Map)))
+          .toList();
+      final counts = data['counts'];
+      myCounts = counts is Map
+          ? counts.map((k, v) => MapEntry('$k', (v as num?)?.toInt() ?? 0))
+          : const <String, int>{};
+      error = null;
+    } on ApiException catch (exception) {
+      error = exception.message;
+    } catch (unexpected) {
+      debugPrint('[CBLREP] my-listings load failed: $unexpected');
+    } finally {
+      myLoading = false;
+      notifyListeners();
+    }
   }
+
+  /// Move one of the member's own listings to a new lifecycle state
+  /// (active | paused | traded | archived), then refresh both the public feed
+  /// and the member's own list.
+  ///
+  /// A listing a moderator has flagged/hidden/removed is refused by the API
+  /// (403) and surfaces as an [ApiException] instead of a silent no-op.
+  Future<void> setMyListingStatus(int id, String status) async {
+    await api.updateListing(id, {'status': status});
+    await Future.wait([
+      load(showSpinner: false),
+      loadMine(showSpinner: false),
+    ]);
+  }
+
+  /// Temporarily hide a listing ("unavailable") without losing it.
+  Future<void> pause(int id) => setMyListingStatus(id, 'paused');
+
+  /// Put a paused/traded/archived listing back in the feed.
+  Future<void> resume(int id) => setMyListingStatus(id, 'active');
+
+  /// Record that a barter/sale went through.
+  Future<void> markTraded(int id) => setMyListingStatus(id, 'traded');
+
+  /// File a listing away in the archive (reversible).
+  Future<void> archive(int id) => setMyListingStatus(id, 'archived');
+
+  /// Backwards-compatible alias: the old "close" is now an archive.
+  Future<void> close(int id) => archive(id);
 
   @override
   void dispose() {
