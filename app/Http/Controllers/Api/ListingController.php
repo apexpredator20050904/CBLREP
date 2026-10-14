@@ -21,6 +21,9 @@ class ListingController extends Controller
     {
         $query = Resource::with(['user', 'category'])
             ->where('is_active', true)
+            // Belt and braces: a paused/traded/archived listing must never leak
+            // into the feed even if `is_active` drifted out of step.
+            ->where('status', Resource::ACTIVE)
             ->latest();
 
         if ($barangay = trim((string) $request->query('barangay', ''))) {
@@ -120,7 +123,7 @@ class ListingController extends Controller
             'latitude' => $validated['latitude'] ?? null,
             'longitude' => $validated['longitude'] ?? null,
             'is_active' => true,
-            'status' => 'active',
+            'status' => Resource::ACTIVE,
             'image_path' => $request->file('image')?->store('listing-images', 'public'),
         ]);
 
@@ -144,12 +147,13 @@ class ListingController extends Controller
             'location' => 'nullable|string|max:255',
             'barangay' => ['sometimes', 'string', \App\Support\Barangays::rule()],
             'purok_sitio' => ['sometimes', 'nullable', 'string', 'max:60', \App\Support\Puroks::rule()],
-            // A member may only CLOSE their own listing. `active` is
-            // deliberately rejected: re-opening is an admin decision
-            // (AdminPortalController::moderateResource), otherwise an owner
-            // could PATCH {status:"active"} and undo a flagged/removed
-            // moderation action on their own listing.
-            'status' => 'sometimes|in:closed',
+            // Owner lifecycle transitions. `closed` is accepted as a legacy
+            // alias for `archived` so older builds keep working. Note that the
+            // moderation states (flagged/hidden/removed) are deliberately NOT
+            // in this list: whether the owner is even allowed to move the
+            // listing at all is decided below against its CURRENT status, so a
+            // member can never pull their listing out of a moderator's hold.
+            'status' => 'sometimes|in:active,paused,traded,archived,closed',
             'image' => 'nullable|image|mimes:jpg,jpeg,png|max:5120',
             'wanted_item' => 'nullable|string|max:160',
         ]);
@@ -195,22 +199,78 @@ class ListingController extends Controller
         } elseif ($resource->compensationType() !== Resource::PAID) {
             $resource->price = null;
         }
-        // Only an explicit {status:"closed"} deactivates a listing. Absent
-        // that, the current visibility is preserved — so editing the title of
-        // a flagged listing does not silently re-activate or close it.
+        // A status change is an owner action, allowed only while the listing is
+        // in an owner-controlled lifecycle state. Anything a moderator has
+        // flagged/hidden/removed stays there — otherwise PATCH {status:"active"}
+        // would silently undo a moderation decision.
         if (array_key_exists('status', $validated)) {
-            $resource->status = 'closed';
-            $resource->is_active = false;
+            if (! $resource->ownerControlsStatus()) {
+                return response()->json([
+                    'message' => 'This listing is under moderation review and cannot be changed here.',
+                ], 403);
+            }
+            $resource->applyOwnerStatus($validated['status']);
         }
         $resource->save();
         return response()->json(['message' => 'Listing updated.', 'data' => $resource->fresh(['user', 'category'])->toFrontendListing()]);
     }
 
+    /**
+     * Archive rather than hard-delete.
+     *
+     * The row and its photo are kept so the owner can restore it, and so the
+     * exchanges/conversations that reference the listing keep resolving. Only
+     * an admin can truly remove a listing. `DELETE` is retained (instead of
+     * just `PATCH {status:"archived"}`) so older app builds that still call it
+     * keep working.
+     */
     public function destroy(Request $request, $id)
     {
         $resource = Resource::where('user_id', $request->user()->id)->findOrFail($id);
-        if ($resource->image_path) Storage::disk('public')->delete($resource->image_path);
-        $resource->update(['is_active' => false, 'status' => 'closed']);
-        return response()->json(['message' => 'Listing closed.']);
+        if (! $resource->ownerControlsStatus()) {
+            return response()->json([
+                'message' => 'This listing is under moderation review and cannot be changed here.',
+            ], 403);
+        }
+
+        $resource->applyOwnerStatus(Resource::ARCHIVED);
+        $resource->save();
+
+        return response()->json(['message' => 'Listing archived.']);
+    }
+
+    /**
+     * The member's own listings — INCLUDING the paused, traded and archived
+     * rows the public feed never returns. This is what backs "My Listings" and
+     * its tabs; previously a closed listing disappeared with no way back.
+     */
+    public function mine(Request $request)
+    {
+        $resources = Resource::with(['user', 'category'])
+            ->where('user_id', $request->user()->id)
+            ->latest()
+            ->get();
+
+        $listings = $resources
+            ->map(fn (Resource $resource) => $resource->toFrontendListing())
+            ->values();
+
+        $counts = ['all' => $resources->count()];
+        foreach (Resource::LIFECYCLE_STATUSES as $status) {
+            $counts[$status] = $resources
+                ->filter(fn (Resource $r) => $r->statusKey() === $status)
+                ->count();
+        }
+        // Listings a moderator has flagged/hidden/removed: shown, but read-only.
+        $counts['held'] = $resources
+            ->filter(fn (Resource $r) => $r->isModerationStatus())
+            ->count();
+
+        return response()->json([
+            'listings' => $listings,
+            // Legacy alias, mirroring the public feed's `data` key.
+            'data' => $listings,
+            'counts' => $counts,
+        ]);
     }
 }

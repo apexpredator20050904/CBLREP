@@ -350,14 +350,10 @@ class AdminPortalController extends Controller
 
     private function adminStatusLabel(Resource $r): string
     {
-        return match ($r->status ?? ($r->is_active ? 'active' : 'closed')) {
-            'active' => 'Active',
-            'pending' => 'Pending',
-            'flagged' => 'Flagged',
-            'hidden' => 'Hidden',
-            'removed' => 'Removed',
-            default => ucfirst((string) $r->status),
-        };
+        // Delegates to the model so the admin console and the app share one
+        // label table (Active/Paused/Traded/Archived/Flagged/Hidden/Removed,
+        // with legacy "closed" folded into Archived).
+        return $r->statusLabel();
     }
 
     private function resourceRow(Resource $r): array
@@ -374,7 +370,7 @@ class AdminPortalController extends Controller
             'exchange_type' => $r->exchange_type ?? 'Lend',
             'owner' => $r->user?->name ?? 'Member',
             'user' => ['id' => $r->user?->id, 'name' => $r->user?->name ?? 'Member'],
-            'status' => $r->status ?? ($r->is_active ? 'active' : 'closed'),
+            'status' => $r->statusKey(),
             'admin_status' => $this->adminStatusLabel($r),
             'location' => $r->location,
             'barangay' => $r->barangay,

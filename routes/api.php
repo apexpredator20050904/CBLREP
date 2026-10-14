@@ -113,6 +113,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Listings & exchanges
     Route::post('/listings', [ListingController::class, 'store']);
+    // The member's own listings, including paused/traded/archived ones that
+    // the public feed hides. Backs the "My Listings" tabs in the app.
+    Route::get('/my-listings', [ListingController::class, 'mine']);
     Route::patch('/listings/{id}', [ListingController::class, 'update']);
     Route::delete('/listings/{id}', [ListingController::class, 'destroy']);
     Route::get('/exchanges', [ExchangeController::class, 'index']);
