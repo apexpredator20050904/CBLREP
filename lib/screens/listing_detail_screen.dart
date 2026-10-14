@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart' hide Feedback;
 import 'package:provider/provider.dart';
+import '../config/community.dart';
 import '../core/api_service.dart';
 import '../core/feedback.dart';
+import '../core/input_sanitizer.dart';
 import '../models/models.dart';
 import '../providers/auth_provider.dart';
 import '../providers/listings_provider.dart';
@@ -9,8 +11,8 @@ import '../theme/cblrep_theme.dart';
 import 'chat_screen.dart';
 import 'login_screen.dart';
 
-/// Item details — full listing info, a direct-barter proposal form, message
-/// owner, and manage (close) for owners.
+/// Item details — full listing info, the owner's return wish, one chat entry
+/// point, a barter trade-offer form, and manage (close) for owners.
 class ListingDetailScreen extends StatefulWidget {
   final ListingModel listing;
   const ListingDetailScreen({super.key, required this.listing});
@@ -45,18 +47,19 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     }
   }
 
-  /// True when it is worth firing the inquiry request at all.
+  /// True when a session exists; otherwise offers the sign-in form and always
+  /// resolves false. [action] names what the member was trying to do, so the
+  /// prompt reads naturally for chat ("message the owner") and for a trade
+  /// offer alike.
   ///
   /// The public listing feed does not need a session, so this screen is
-  /// reachable signed out — and a session can also die mid-run. Opening a
-  /// thread needs both, so ask first instead of sending a request that can
+  /// reachable signed out — and a session can also die mid-run. Any action
+  /// that needs a session asks first instead of sending a request that can
   /// only answer 401 and putting the raw server string ("Unauthenticated.")
   /// in front of the member.
-  Future<bool> _canMessage() async {
+  Future<bool> _ensureSignedIn(String action) async {
     if (context.read<AuthProvider>().isAuthenticated) return true;
-    return _promptSignIn(
-      'Sign in to message the owner about this listing.',
-    );
+    return _promptSignIn('Sign in to $action.');
   }
 
   /// Offers the sign-in form and always resolves false: the form replaces the
@@ -91,17 +94,21 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     Feedback.error(context, e.message, onRetry: onRetry);
   }
 
-  /// Open the direct-inquiry chat. This is the single negotiation channel for
-  /// every compensation type — claim a gift, arrange a trade, or agree a price
-  /// and pickup — replacing the old fixed barter-proposal forms.
-  Future<void> _messageOwner() async {
+  /// The single entry point for reaching the owner: open (or resume) the
+  /// listing-scoped thread.
+  ///
+  /// This replaces the old pair of buttons that both opened the same chat
+  /// ("Message / Inquire" and "Start a negotiation"). A tailored opener is
+  /// seeded only on a brand-new thread, so returning to an ongoing
+  /// conversation never re-injects a greeting.
+  Future<void> _contactOwner() async {
     if (widget.listing.ownerId <= 0) {
       if (mounted) {
         Feedback.info(context, 'Owner chat is unavailable for this listing.');
       }
       return;
     }
-    if (!await _canMessage()) return;
+    if (!await _ensureSignedIn('message the owner about this listing')) return;
     try {
       // Scope the thread to this listing so the conversation shows which post
       // the inquiry is about, and each listing gets its own chat.
@@ -114,59 +121,58 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
           : <String, dynamic>{'id': widget.listing.ownerId};
       final id = (conv['id'] as num?)?.toInt() ?? 0;
       if (!mounted || id <= 0) return;
-      await Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => ChatScreen(conversationId: id, title: widget.listing.owner)),
-      );
-    } on ApiException catch (e) {
-      _reportFailure(e, _messageOwner);
-    }
-  }
-
-  /// Open the inquiry chat pre-filled with a suggested opener tailored to the
-  /// listing's compensation type, so a member can start negotiating in one tap.
-  Future<void> _inquireWithOpening() async {
-    final listing = widget.listing;
-    final opener = switch (listing.compensationType) {
-      'free' => 'Hi! Is "${listing.title}" still available for free? I can pick it up.',
-      'paid' => 'Hi! I am interested in "${listing.title}"'
-          '${listing.price != null ? ' (listed at ₱${listing.price!.toStringAsFixed(listing.price == listing.price!.roundToDouble() ? 0 : 2)})' : ''}. '
-          'Is the price negotiable?',
-      _ => 'Hi! I would like to trade for "${listing.title}". What would you like in return?',
-    };
-    await _openChat(opener);
-  }
-
-  /// Open (or resume) the listing thread, optionally seeding [prefill] the
-  /// first time so the member lands in the chat with a ready message.
-  Future<void> _openChat(String prefill) async {
-    if (widget.listing.ownerId <= 0) {
-      if (mounted) Feedback.info(context, 'Owner chat is unavailable for this listing.');
-      return;
-    }
-    if (!await _canMessage()) return;
-    try {
-      final res = await ApiService.instance.startConversation(
-        widget.listing.ownerId,
-        listingId: widget.listing.id,
-      );
-      final conv = res['conversation'] is Map
-          ? Map<String, dynamic>.from(res['conversation'] as Map)
-          : <String, dynamic>{'id': widget.listing.ownerId};
-      final id = (conv['id'] as num?)?.toInt() ?? 0;
-      if (!mounted || id <= 0) return;
+      // `last_message_at` stays null until the first message is sent, so it
+      // distinguishes a brand-new thread from an ongoing one without an extra
+      // request.
+      final isNewThread = conv['last_message_at'] == null;
       await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => ChatScreen(
             conversationId: id,
             title: widget.listing.owner,
-            initialDraft: prefill,
+            initialDraft: isNewThread ? _suggestedOpener(widget.listing) : null,
           ),
         ),
       );
     } on ApiException catch (e) {
-      _reportFailure(e, () => _openChat(prefill));
+      _reportFailure(e, _contactOwner);
+    }
+  }
+
+  /// A ready-made first message tailored to how the owner wants to share, so a
+  /// member can start talking in one tap.
+  String _suggestedOpener(ListingModel listing) =>
+      switch (listing.compensationType) {
+        'free' => 'Hi! Is "${listing.title}" still available for free? I can pick it up.',
+        'paid' => 'Hi! I am interested in "${listing.title}"'
+            '${listing.price != null ? ' (listed at ₱${listing.price!.toStringAsFixed(listing.price == listing.price!.roundToDouble() ? 0 : 2)})' : ''}. '
+            'Is the price negotiable?',
+        _ => 'Hi! I would like to trade for "${listing.title}". What would you like in return?',
+      };
+
+  /// Open the structured barter offer: choose or describe what you give in
+  /// return, confirm the handover location, and send a proposal the owner can
+  /// accept or decline in the Exchanges tab.
+  ///
+  /// This is deliberately *not* the chat — a recorded, two-sided offer is a
+  /// different real-world act from haggling in messages, and only barter
+  /// listings have a return side to offer.
+  Future<void> _openTradeOffer() async {
+    if (widget.listing.ownerId <= 0) {
+      if (mounted) Feedback.info(context, 'Owner chat is unavailable for this listing.');
+      return;
+    }
+    if (!await _ensureSignedIn('send a trade offer for this listing')) return;
+    if (!mounted) return;
+    final sent = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _TradeOfferSheet(listing: widget.listing),
+    );
+    if (sent == true && mounted) {
+      Feedback.success(context, 'Trade offer sent. Track it in Exchanges.');
     }
   }
 
@@ -236,6 +242,12 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
             ],
             const SizedBox(height: 8),
             Text(listing.description.isEmpty ? 'No description provided.' : listing.description, style: TextStyle(fontSize: 13, color: dark ? Colors.white : Colors.black87)),
+            // The return side of a barter, spelled out so a member knows what
+            // the owner will actually trade for before they offer anything.
+            if (listing.isBarter && listing.hasWantedItem) ...[
+              const SizedBox(height: 10),
+              _row(Icons.swap_horiz, listing.wantedItem!, label: 'Wants in return'),
+            ],
             const Divider(height: 24),
             // Hyper-local context: the exact barangay + purok/sitio the item
             // is in, shown as explicit tags.
@@ -248,32 +260,36 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
           ]),
         ),
         const SizedBox(height: 12),
-        // Primary action: open the direct-inquiry chat about this listing.
-        // This is the Facebook-Marketplace-style negotiation channel and works
-        // for every compensation type (claim a gift, arrange a trade, or buy).
-        // Hidden for the owner — you cannot message yourself.
+        // Primary action for everyone else: open the single direct-inquiry
+        // chat about this listing. This is the Facebook-Marketplace-style
+        // negotiation channel and works for every compensation type (claim a
+        // gift, arrange a trade, or buy). Hidden for the owner — you cannot
+        // message yourself.
         if (!isOwner) ...[
           SizedBox(
             height: 48,
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: _messageOwner,
+              onPressed: _contactOwner,
               icon: const Icon(Icons.chat_bubble_outline, size: 18),
               label: Text(_inquireLabel),
             ),
           ),
-          const SizedBox(height: 8),
-          // One-tap negotiation: opens the same thread with a tailored opener,
-          // so members skip the rigid proposal forms entirely.
-          SizedBox(
-            height: 44,
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: _inquireWithOpening,
-              icon: const Icon(Icons.auto_awesome, size: 16),
-              label: const Text('Start a negotiation'),
+          // Barter only: a recorded, two-sided offer is a different act from
+          // chatting, so it gets its own CTA. Free/paid listings have no
+          // return side, so this is omitted rather than shown disabled.
+          if (listing.isBarter) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 44,
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _openTradeOffer,
+                icon: const Icon(Icons.swap_horiz, size: 18),
+                label: const Text('Make a trade offer'),
+              ),
             ),
-          ),
+          ],
           const SizedBox(height: 8),
         ],
         if (isOwner)
@@ -453,4 +469,234 @@ class _LocationTags extends StatelessWidget {
       );
 
   bool dark(BuildContext context) => Theme.of(context).brightness == Brightness.dark;
+}
+
+/// Modal sheet for proposing a direct barter: the return side (one of your own
+/// listings, or a short description of a skill/item) plus the handover
+/// location. Mirrors `POST /api/exchanges`, which makes a return side mandatory
+/// — that requirement is what separates a barter from a one-sided gift.
+///
+/// It replaces the old detail-screen free-text barter form with something that
+/// reflects what really happens: you point at a thing you own, or you name what
+/// you can give, and you agree where to hand it over.
+class _TradeOfferSheet extends StatefulWidget {
+  final ListingModel listing;
+  const _TradeOfferSheet({required this.listing});
+
+  @override
+  State<_TradeOfferSheet> createState() => _TradeOfferSheetState();
+}
+
+class _TradeOfferSheetState extends State<_TradeOfferSheet> {
+  final _describe = TextEditingController();
+  final _purok = TextEditingController();
+
+  /// 'listing' → offer one of my own listings; 'describe' → free text.
+  String _mode = 'describe';
+  int? _offeredResourceId;
+  String _barangay = trinidadBarangays.first;
+  String? _error;
+  bool _sending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final user = context.read<AuthProvider>().user;
+    if (user != null) {
+      if (trinidadBarangays.contains(user.barangay)) _barangay = user.barangay;
+      _purok.text = user.purokSitio;
+    }
+    // Prefer the pick-a-listing path when the member already has something to
+    // offer; otherwise the free-text path is the only one that can work.
+    if (_ownOfferable().isNotEmpty) _mode = 'listing';
+  }
+
+  @override
+  void dispose() {
+    _describe.dispose();
+    _purok.dispose();
+    super.dispose();
+  }
+
+  /// The member's own active listings, minus the one being requested — the
+  /// backend 422s a self-trade, so it must not be offerable here.
+  List<ListingModel> _ownOfferable() {
+    final myId = context.read<AuthProvider>().user?.id;
+    if (myId == null) return const [];
+    return context
+        .read<ListingsProvider>()
+        .listings
+        .where((l) => l.ownerId == myId && l.active && l.id != widget.listing.id)
+        .toList();
+  }
+
+  /// Validate locally first so a member sees the fix in one line instead of
+  /// waiting on a round trip that answers 422 with a server-phrased message.
+  String? _validate(String offeredItem) {
+    if (_mode == 'listing' && _offeredResourceId == null) {
+      return 'Choose which of your listings to offer.';
+    }
+    if (_mode == 'describe' && offeredItem.isEmpty) {
+      return 'Describe what you will offer in return.';
+    }
+    final purok = _purok.text.trim();
+    if (purok.isEmpty || (!purok.startsWith('Purok') && !purok.startsWith('Sitio'))) {
+      return 'Enter a pick-up point like "Purok 3" or "Sitio Name".';
+    }
+    return null;
+  }
+
+  Future<void> _send() async {
+    final offeredItem = _describe.text.trim();
+    final error = _validate(offeredItem);
+    if (error != null) {
+      setState(() => _error = error);
+      return;
+    }
+
+    setState(() {
+      _sending = true;
+      _error = null;
+    });
+    try {
+      await ApiService.instance.createExchange(
+        resourceId: widget.listing.id,
+        offeredResourceId: _mode == 'listing' ? _offeredResourceId : null,
+        offeredItem: _mode == 'describe' ? InputSanitizer.text(offeredItem, max: 160) : null,
+        barangay: _barangay,
+        purokSitio: InputSanitizer.clean(_purok.text.trim()),
+      );
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _sending = false;
+        _error = e.statusCode == 401
+            ? 'Your session has expired. Please sign in again.'
+            : e.message;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final own = _ownOfferable();
+    final foreground = dark ? Colors.white : Colors.black;
+    final muted = dark ? Colors.white70 : Colors.black54;
+
+    return Padding(
+      // Lift the sheet above the keyboard so the purok field stays visible.
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        decoration: BoxDecoration(
+          color: dark ? CblrepColors.deepForest : Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+        ),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 14),
+                  decoration: BoxDecoration(
+                    color: dark ? Colors.white24 : Colors.black26,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Text('Make a trade offer', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: foreground)),
+              const SizedBox(height: 4),
+              Text('For “${widget.listing.title}”', style: TextStyle(fontSize: 12, color: muted)),
+              if (widget.listing.hasWantedItem) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'Owner wants: ${widget.listing.wantedItem}',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: CblrepColors.compBarter),
+                ),
+              ],
+              const SizedBox(height: 16),
+              Text('What you give in return', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: foreground)),
+              const SizedBox(height: 8),
+              // Not a required-choice widget: either path alone satisfies the
+              // two-sided rule, so a member without a spare listing can still
+              // trade a skill.
+              SegmentedButton<String>(
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(value: 'listing', label: Text('My listing'), icon: Icon(Icons.inventory_2_outlined, size: 16)),
+                  ButtonSegment(value: 'describe', label: Text('Describe it'), icon: Icon(Icons.edit_outlined, size: 16)),
+                ],
+                selected: {_mode},
+                onSelectionChanged: (value) => setState(() {
+                  _mode = value.first;
+                  _error = null;
+                }),
+              ),
+              const SizedBox(height: 12),
+              if (_mode == 'listing')
+                if (own.isEmpty)
+                  Text(
+                    'You have no other active listings. Switch to “Describe it” to name an item or a skill.',
+                    style: TextStyle(fontSize: 12, color: muted),
+                  )
+                else
+                  DropdownButtonFormField<int>(
+                    initialValue: _offeredResourceId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Choose one of your listings'),
+                    items: own
+                        .map((l) => DropdownMenuItem(value: l.id, child: Text(l.title, overflow: TextOverflow.ellipsis)))
+                        .toList(),
+                    onChanged: (value) => setState(() => _offeredResourceId = value),
+                  )
+              else
+                TextField(
+                  controller: _describe,
+                  maxLength: 160,
+                  decoration: const InputDecoration(labelText: 'e.g. 5 kg of rice, or an hour of plumbing help'),
+                ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: _barangay,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Handover barangay'),
+                items: trinidadBarangays
+                    .map((value) => DropdownMenuItem(value: value, child: Text(value, overflow: TextOverflow.ellipsis)))
+                    .toList(),
+                onChanged: (value) {
+                  if (value != null) setState(() => _barangay = value);
+                },
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _purok,
+                decoration: const InputDecoration(labelText: 'Purok / Sitio (pick-up point)'),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Text(_error!, style: const TextStyle(fontSize: 12, color: CblrepColors.dangerRed)),
+              ],
+              const SizedBox(height: 16),
+              SizedBox(
+                height: 46,
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _sending ? null : _send,
+                  icon: const Icon(Icons.send_outlined, size: 18),
+                  label: Text(_sending ? 'Sending…' : 'Send offer'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
