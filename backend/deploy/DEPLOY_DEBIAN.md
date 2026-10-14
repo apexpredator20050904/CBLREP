@@ -167,6 +167,32 @@ to its in-app notification poll (10s), so this step can be done at any time.
    (project `cblrep`, package `ph.cblrep.app`). That is a **build-time** file,
    not a server one — see step 11.
 
+### Mobile release channel (in-app updates)
+
+`GET /api/app-version` lets the app detect a newer APK and offer it (the app
+ships from GitHub Releases, so this is a custom updater, not the Play API). It
+is public and read-only; keep it configured so members on older builds are
+nudged to update.
+
+Set these in the production `.env` (already in the template) and bump them with
+every release:
+
+```
+APP_VERSION_CODE=2          # MUST increase each release (app versionCode)
+APP_VERSION_NAME=1.2.0
+APP_MIN_SUPPORTED_CODE=1    # builds below this are FORCED to update
+APP_APK_URL=https://github.com/apexpredator20050904/CBLREP/releases/download/v1.2.0/app-release.apk
+APP_RELEASE_NOTES=My Listings lifecycle + in-app updates
+```
+
+```bash
+php artisan config:clear   # then config:cache, to pick up the new values
+curl -s https://api.cblrep.ph/api/app-version   # confirm the payload
+```
+
+Leave `APP_APK_URL` empty to disable the prompt (the API still answers 200 with
+an empty URL, which the app treats as "no update channel").
+
 Permissions — PHP-FPM runs as `www-data` and must write to `storage/` and
 `bootstrap/cache/`:
 
