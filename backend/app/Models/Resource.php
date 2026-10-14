@@ -29,6 +29,53 @@ class Resource extends Model
         self::PAID => 'PAID',
     ];
 
+    // ------------------------------------------------------------------
+    // Lifecycle vs moderation
+    // ------------------------------------------------------------------
+    //
+    // A listing has ONE status column, but two different people may set it:
+    //
+    //   * the OWNER moves a listing through its life — pause it while lent out,
+    //     mark it traded once a barter completes, file it away in the archive;
+    //   * an ADMIN holds a listing back for review — flagged/hidden/removed.
+    //
+    // Keeping the two vocabularies separate is what makes "a member can only
+    // move their own listing" expressible: an owner may never move a listing
+    // OUT of a moderation state, otherwise PATCH {status:"active"} would
+    // silently undo a moderator's decision.
+
+    /** Owner-controlled lifecycle statuses. */
+    public const ACTIVE = 'active';
+
+    public const PAUSED = 'paused';
+
+    public const TRADED = 'traded';
+
+    public const ARCHIVED = 'archived';
+
+    public const LIFECYCLE_STATUSES = [self::ACTIVE, self::PAUSED, self::TRADED, self::ARCHIVED];
+
+    /** Admin-controlled moderation statuses (never owner-settable). */
+    public const FLAGGED = 'flagged';
+
+    public const HIDDEN = 'hidden';
+
+    public const REMOVED = 'removed';
+
+    public const MODERATION_STATUSES = ['pending', self::FLAGGED, self::HIDDEN, self::REMOVED];
+
+    /** Badge text for every status, incl. legacy "closed". */
+    public const STATUS_LABELS = [
+        self::ACTIVE => 'Active',
+        self::PAUSED => 'Paused',
+        self::TRADED => 'Traded',
+        self::ARCHIVED => 'Archived',
+        self::FLAGGED => 'Flagged',
+        self::HIDDEN => 'Hidden',
+        self::REMOVED => 'Removed',
+        'pending' => 'Pending',
+    ];
+
     protected $fillable = [
         'user_id',
         'category_id',
@@ -66,6 +113,67 @@ class Resource extends Model
     public function compensationLabel(): string
     {
         return self::COMPENSATION_LABELS[$this->compensationType()] ?? 'BARTER';
+    }
+
+    // ------------------------------------------------------------------
+    // Status helpers
+    // ------------------------------------------------------------------
+
+    /**
+     * Canonical status. Legacy rows stored "closed" for what is now an archive
+     * and rows written before the status column existed may be null, so both
+     * are folded in here instead of being migrated.
+     */
+    public function statusKey(): string
+    {
+        $status = (string) ($this->status ?? '');
+        if ($status === '') {
+            return $this->is_active ? self::ACTIVE : self::ARCHIVED;
+        }
+
+        return $status === 'closed' ? self::ARCHIVED : $status;
+    }
+
+    public function isLifecycleStatus(): bool
+    {
+        return in_array($this->statusKey(), self::LIFECYCLE_STATUSES, true);
+    }
+
+    public function isModerationStatus(): bool
+    {
+        return in_array($this->statusKey(), self::MODERATION_STATUSES, true);
+    }
+
+    /** Only the owner may change a listing that is in a lifecycle state. */
+    public function ownerControlsStatus(): bool
+    {
+        return $this->isLifecycleStatus();
+    }
+
+    /** Live in the community feed: active AND not mangled by a stale flag. */
+    public function isPubliclyVisible(): bool
+    {
+        return $this->statusKey() === self::ACTIVE && (bool) $this->is_active;
+    }
+
+    public function statusLabel(): string
+    {
+        return self::STATUS_LABELS[$this->statusKey()] ?? ucfirst($this->statusKey());
+    }
+
+    /**
+     * Apply an owner-initiated transition, normalising the legacy "closed"
+     * alias and keeping `is_active` in step with the status so the feed query
+     * and the status column can never disagree.
+     */
+    public function applyOwnerStatus(string $status): void
+    {
+        $normalized = $status === 'closed' ? self::ARCHIVED : $status;
+        if (! in_array($normalized, self::LIFECYCLE_STATUSES, true)) {
+            return;
+        }
+        $this->status = $normalized;
+        $this->is_active = $normalized === self::ACTIVE;
     }
 
     /**
@@ -125,8 +233,9 @@ class Resource extends Model
             'purok_sitio' => $this->purok_sitio,
             'latitude' => $this->latitude ?? \App\Support\BarangayLocations::for($this->location)[0],
             'longitude' => $this->longitude ?? \App\Support\BarangayLocations::for($this->location)[1],
-            'status' => $this->status ?? 'active',
-            'is_active' => (bool) $this->is_active,
+            'status' => $this->statusKey(),
+            'status_label' => $this->statusLabel(),
+            'is_active' => $this->isPubliclyVisible(),
             'owner' => [
                 'id' => $this->user?->id,
                 'name' => $this->user?->name ?? 'Member',

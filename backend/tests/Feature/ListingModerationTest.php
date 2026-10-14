@@ -8,15 +8,20 @@ use App\Models\User;
 use Tests\TestCase;
 
 /**
- * A listing owner must never be able to undo an admin moderation decision.
+ * A listing owner must never be able to undo an admin moderation decision,
+ * while still owning the ordinary lifecycle of their own listing.
  *
  * `PATCH /api/listings/{id}` is member-facing, so before the fix a member
  * could send `{"status":"active"}` and revive their own flagged or removed
  * listing — the moderation endpoint in AdminPortalController was bypassable
  * by the party it was meant to constrain.
  *
- * Regression coverage for that bypass, plus the close path that members
- * legitimately own.
+ * The rule now: an owner may move a listing between the lifecycle statuses
+ * (active / paused / traded / archived) only while it is in one of them; a
+ * listing a moderator has flagged/hidden/removed is frozen to the owner (403).
+ *
+ * Regression coverage for the bypass, the lifecycle transitions members
+ * legitimately own, and the archive-instead-of-delete path.
  */
 class ListingModerationTest extends TestCase
 {
@@ -59,7 +64,7 @@ class ListingModerationTest extends TestCase
 
         $this->actingAs($owner)
             ->patchJson("/api/listings/{$listing->id}", ['status' => 'active'])
-            ->assertStatus(422);
+            ->assertStatus(403);
 
         $fresh = $listing->fresh();
         $this->assertSame('flagged', $fresh->status);
@@ -74,7 +79,7 @@ class ListingModerationTest extends TestCase
 
         $this->actingAs($owner)
             ->patchJson("/api/listings/{$listing->id}", ['status' => 'active'])
-            ->assertStatus(422);
+            ->assertStatus(403);
 
         $fresh = $listing->fresh();
         $this->assertSame('removed', $fresh->status);
@@ -103,13 +108,123 @@ class ListingModerationTest extends TestCase
         $owner = $this->member();
         $listing = $this->listingFor($owner);
 
+        // "closed" is the legacy word for an archive; it is folded into the
+        // canonical "archived" status on write.
         $this->actingAs($owner)
             ->patchJson("/api/listings/{$listing->id}", ['status' => 'closed'])
             ->assertOk();
 
         $fresh = $listing->fresh();
-        $this->assertSame('closed', $fresh->status);
+        $this->assertSame('archived', $fresh->status);
         $this->assertFalse($fresh->is_active);
+    }
+
+    public function test_owner_can_pause_and_resume_their_own_listing(): void
+    {
+        $owner = $this->member();
+        $listing = $this->listingFor($owner);
+
+        $this->actingAs($owner)
+            ->patchJson("/api/listings/{$listing->id}", ['status' => 'paused'])
+            ->assertOk();
+        $this->assertSame('paused', $listing->fresh()->status);
+        $this->assertFalse($listing->fresh()->is_active);
+
+        // Re-opening a paused listing is an owner decision and must succeed —
+        // it is NOT a moderation state, so nothing is being bypassed.
+        $this->actingAs($owner)
+            ->patchJson("/api/listings/{$listing->id}", ['status' => 'active'])
+            ->assertOk();
+        $this->assertSame('active', $listing->fresh()->status);
+        $this->assertTrue($listing->fresh()->is_active);
+    }
+
+    public function test_owner_can_mark_a_listing_traded(): void
+    {
+        $owner = $this->member();
+        $listing = $this->listingFor($owner);
+
+        $this->actingAs($owner)
+            ->patchJson("/api/listings/{$listing->id}", ['status' => 'traded'])
+            ->assertOk();
+
+        $this->assertSame('traded', $listing->fresh()->status);
+        $this->assertFalse($listing->fresh()->is_active);
+    }
+
+    public function test_owner_cannot_pause_a_flagged_listing(): void
+    {
+        $owner = $this->member();
+        $listing = $this->listingFor($owner);
+        $listing->update(['status' => 'hidden', 'is_active' => false]);
+
+        // Any owner status change on a moderated listing is refused, not just
+        // re-opening: the moderator's state is not the owner's to move.
+        $this->actingAs($owner)
+            ->patchJson("/api/listings/{$listing->id}", ['status' => 'paused'])
+            ->assertStatus(403);
+
+        $this->assertSame('hidden', $listing->fresh()->status);
+    }
+
+    public function test_delete_archives_the_listing_and_keeps_the_row(): void
+    {
+        $owner = $this->member();
+        $listing = $this->listingFor($owner);
+
+        $this->actingAs($owner)
+            ->deleteJson("/api/listings/{$listing->id}")
+            ->assertOk();
+
+        $fresh = $listing->fresh();
+        $this->assertNotNull($fresh, 'Archiving must not hard-delete the row.');
+        $this->assertSame('archived', $fresh->status);
+        $this->assertFalse($fresh->is_active);
+    }
+
+    public function test_my_listings_includes_non_active_rows(): void
+    {
+        $owner = $this->member();
+        $active = $this->listingFor($owner);
+        $paused = $this->listingFor($owner);
+        $paused->applyOwnerStatus('paused');
+        $paused->save();
+        $archived = $this->listingFor($owner);
+        $archived->applyOwnerStatus('archived');
+        $archived->save();
+
+        $response = $this->actingAs($owner)
+            ->getJson('/api/my-listings')
+            ->assertOk();
+
+        $ids = collect($response->json('listings'))->pluck('id')->all();
+        $this->assertContains($active->id, $ids);
+        $this->assertContains($paused->id, $ids, 'A paused listing must be listed back to its owner.');
+        $this->assertContains($archived->id, $ids, 'An archived listing must be listed back to its owner.');
+
+        $this->assertSame(1, $response->json('counts.active'));
+        $this->assertSame(1, $response->json('counts.paused'));
+        $this->assertSame(1, $response->json('counts.archived'));
+        $this->assertSame(3, $response->json('counts.all'));
+    }
+
+    public function test_my_listings_is_scoped_to_the_signed_in_member(): void
+    {
+        $owner = $this->member();
+        $this->listingFor($owner);
+        $other = User::create([
+            'name' => 'Someone Else',
+            'email' => 'other@example.test',
+            'password' => bcrypt('secret1234'),
+            'role' => 'user',
+            'barangay' => 'Poblacion',
+            'barangay_or_location' => 'Poblacion',
+        ]);
+
+        $response = $this->actingAs($other)->getJson('/api/my-listings')->assertOk();
+
+        $this->assertSame([], $response->json('listings'));
+        $this->assertSame(0, $response->json('counts.all'));
     }
 
     public function test_owner_cannot_edit_another_members_listing(): void
