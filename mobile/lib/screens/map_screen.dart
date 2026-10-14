@@ -186,7 +186,7 @@ class _MapScreenState extends State<MapScreen> {
               children: [
                 TileLayer(
                   urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.example.untitled1',
+                  userAgentPackageName: 'ph.cblrep.app',
                   // Dark mode: invert the light OSM tiles so the map stays legible.
                   tileBuilder: dark ? _darkTile : null,
                 ),

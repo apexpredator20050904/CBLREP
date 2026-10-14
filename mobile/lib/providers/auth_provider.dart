@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../core/api_service.dart';
 import '../core/input_sanitizer.dart';
+import '../core/push_service.dart';
 import '../core/session_prefs.dart';
 import '../models/models.dart';
 
@@ -52,6 +53,10 @@ class AuthProvider extends ChangeNotifier {
         return;
       }
       user = UserModel.fromJson(await api.currentUser());
+      // A restored session is signed in too — make sure this device is
+      // registered for push (e.g. after a reinstall or a token rotation while
+      // the app was closed).
+      unawaited(PushService.instance.syncToken());
     } on ApiException catch (exception) {
       final status = exception.statusCode;
       if (status == 401 || status == 403) {
@@ -117,6 +122,8 @@ class AuthProvider extends ChangeNotifier {
       final data = await api.login(email.trim(), password, rememberMe: rememberMe);
       await SessionPrefs.recordSignIn(rememberMe: rememberMe, email: email.trim());
       user = UserModel.fromJson(Map<String, dynamic>.from(data['user'] as Map));
+      // Register this device for push now that we hold an authenticated session.
+      unawaited(PushService.instance.syncToken());
     } on ApiException catch (exception) {
       error = exception.message;
       rethrow;
@@ -147,6 +154,9 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    // Drop this device's push token first: the delete is authenticated, and
+    // api.logout() clears the auth token in its finally block.
+    await PushService.instance.onSignedOut();
     try {
       await api.logout();
     } catch (_) {

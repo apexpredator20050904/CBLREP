@@ -1,6 +1,9 @@
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'core/api_service.dart';
+import 'core/push_service.dart';
 import 'providers/app_settings_provider.dart';
 import 'providers/auth_provider.dart';
 import 'providers/chat_provider.dart';
@@ -10,7 +13,21 @@ import 'theme/cblrep_theme.dart';
 import 'widgets/cblrep_shell.dart';
 import 'screens/login_screen.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Push notifications are an enhancement over the in-app 10s poll. If Firebase
+  // is misconfigured (missing google-services.json, a device without Google Play
+  // services, …) the app must still launch and work via polling, so every step
+  // here fails soft.
+  try {
+    await Firebase.initializeApp();
+    FirebaseMessaging.onBackgroundMessage(cblrepBackgroundMessageHandler);
+    await PushService.instance.init(ApiService.instance);
+  } catch (error) {
+    debugPrint('[CBLREP] push notifications unavailable: $error');
+  }
+
   runApp(const MyApp());
 }
 
