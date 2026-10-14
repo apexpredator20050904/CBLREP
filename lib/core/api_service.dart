@@ -707,6 +707,26 @@ class ApiService {
       Map<String, dynamic>.from(
           await _request(_dio.put('/notifications/$id/read')) as Map);
 
+  // ── Push device tokens (FCM) ─────────────────────────────────────────
+  /// POST /device-tokens — associate this device's FCM token with the member so
+  /// the backend can push alerts even when the app is closed. The server
+  /// upserts on the token, so calling this repeatedly is safe.
+  Future<void> registerDeviceToken({
+    required String token,
+    required String platform,
+  }) async {
+    await _request(_dio.post('/device-tokens', data: {
+      'token': token,
+      'platform': platform,
+    }));
+  }
+
+  /// DELETE /device-tokens — drop the association on sign-out so a signed-out
+  /// device stops receiving the previous member's alerts.
+  Future<void> deleteDeviceToken(String token) async {
+    await _request(_dio.delete('/device-tokens', data: {'token': token}));
+  }
+
   // ── Conversations / secure in-app messaging ──────────────────────────
   Future<List<dynamic>> conversations() async {
     final data = await _request(_dio.get('/conversations')) as Map;

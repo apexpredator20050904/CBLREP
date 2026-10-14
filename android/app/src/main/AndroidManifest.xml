@@ -7,6 +7,8 @@
     <!-- Camera capture for chat photo attachments (image_picker). -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Android 13+: runtime permission required before FCM can post notifications. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
         android:label="CBLREP"
         android:name="${applicationName}"
@@ -17,6 +19,12 @@
         <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="${mapsApiKey}" />
+        <!-- Channel used by FCM for notifications when the app is backgrounded
+             or closed; created in Dart (see PushService). Must match the Dart
+             channel id. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="cblrep_messages" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -14,3 +14,9 @@
 # Line numbers make release crash reports readable; hide the original file.
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
+
+# Firebase Cloud Messaging — R8 full mode can strip classes the FCM runtime
+# resolves reflectively, which makes notifications silently stop working in
+# release builds only.
+-keep class com.google.firebase.** { *; }
+-dontwarn com.google.firebase.**
