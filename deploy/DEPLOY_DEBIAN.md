@@ -133,6 +133,40 @@ php artisan route:cache
 php artisan view:cache
 ```
 
+### Push notifications (FCM) — chat alerts while the app is closed
+
+Push is optional. With no key the API still works and the mobile app falls back
+to its in-app notification poll (10s), so this step can be done at any time.
+
+1. Firebase console → ⚙ **Project settings** → **Service accounts** →
+   **Generate new private key**. Save the downloaded JSON on the server as
+   `backend/storage/app/firebase/service-account.json` (the directory already
+   exists and is git-ignored):
+
+   ```bash
+   sudo chown www-data:www-data /var/www/cblrep/backend/storage/app/firebase/service-account.json
+   sudo chmod 600 /var/www/cblrep/backend/storage/app/firebase/service-account.json
+   ```
+
+2. Point `.env` at it and set the project id (both already in the production
+   template — just confirm the file is really there):
+
+   ```
+   FIREBASE_CREDENTIALS=/var/www/cblrep/backend/storage/app/firebase/service-account.json
+   FIREBASE_PROJECT_ID=cblrep
+   ```
+
+3. Rebuild the config cache and confirm the credential loads:
+
+   ```bash
+   php artisan config:cache
+   php artisan tinker --execute="echo app(App\Services\PushService::class)->isConfigured() ? 'FCM ready' : 'FCM NOT configured';"
+   ```
+
+4. The mobile APK additionally needs `android/app/google-services.json`
+   (project `cblrep`, package `ph.cblrep.app`). That is a **build-time** file,
+   not a server one — see step 11.
+
 Permissions — PHP-FPM runs as `www-data` and must write to `storage/` and
 `bootstrap/cache/`:
 

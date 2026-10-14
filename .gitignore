@@ -29,6 +29,9 @@
 !/storage/app/public/.gitignore
 /storage/app/private/*
 !/storage/app/private/.gitignore
+# Firebase service-account key (server-side push credential) — never commit.
+/storage/app/firebase/*
+!/storage/app/firebase/.gitignore
 
 # Compiled admin console / Laravel Vite output. Rebuild from `frontend/` with
 # `npm run build`; never commit generated bundles.
