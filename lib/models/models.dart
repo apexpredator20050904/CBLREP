@@ -144,8 +144,9 @@ class ListingModel {
   bool get isPaid => compensationType == 'paid';
   bool get isBarter => !isFree && !isPaid;
 
-  /// True when the owner named what they want back (barter only).
-  bool get hasWantedItem => (wantedItem?.isNotEmpty ?? false);
+  /// True when the owner named what they want back. Barter-only: free and paid
+  /// listings have no return side, so a stale payload cannot surface one.
+  bool get hasWantedItem => isBarter && (wantedItem?.isNotEmpty ?? false);
 
   factory ListingModel.fromJson(Map<String, dynamic> json) {
     final owner = json['owner'];

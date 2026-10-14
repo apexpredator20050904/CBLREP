@@ -109,6 +109,7 @@ class ListingsProvider extends ChangeNotifier {
     required String purokSitio,
     String compensationType = 'barter',
     double? price,
+    String? wantedItem,
     File? image,
   }) async {
     final created = await api.createListing(
@@ -123,6 +124,11 @@ class ListingsProvider extends ChangeNotifier {
       purokSitio: InputSanitizer.name(purokSitio),
       compensationType: compensationType,
       price: price,
+      // Barter-only: the return side. Free/paid listings have none, and the
+      // backend nulls it for them regardless.
+      wantedItem: compensationType == 'barter' && (wantedItem?.isNotEmpty ?? false)
+          ? InputSanitizer.text(wantedItem!, max: 160)
+          : null,
       image: image,
     );
     await load();

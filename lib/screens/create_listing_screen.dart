@@ -21,6 +21,9 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
   final formKey = GlobalKey<FormState>();
   final title = TextEditingController(), description = TextEditingController(), purok = TextEditingController();
   final price = TextEditingController();
+  // The return side of a barter — what the member hopes to receive. Ignored
+  // for free/paid listings, which have no return side.
+  final wanted = TextEditingController();
   String category = 'Tools';
   String type = 'offer', condition = 'Good', barangay = trinidadBarangays.first;
   // Flexible compensation: free | barter | paid.
@@ -37,7 +40,7 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
   };
 
   @override
-  void dispose() { title.dispose(); description.dispose(); purok.dispose(); price.dispose(); super.dispose(); }
+  void dispose() { title.dispose(); description.dispose(); purok.dispose(); price.dispose(); wanted.dispose(); super.dispose(); }
 
   Future<void> pickImage(ImageSource source) async {
     final picked = await ImagePicker().pickImage(source: source, imageQuality: 80, maxWidth: 1600);
@@ -74,6 +77,7 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
             // Only a paid listing carries a price; free/barter send none.
             compensationType: compensation,
             price: compensation == 'paid' ? double.tryParse(price.text.trim()) : null,
+            wantedItem: compensation == 'barter' ? wanted.text.trim() : null,
             image: image,
           );
       if (!mounted) return;
@@ -133,6 +137,20 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
           ),
           const SizedBox(height: 8),
           _CompensationNotice(type: compensation, copy: _compensationCopy[compensation]!),
+          // Barter only: the poster's own return wish. Naming it up front is
+          // what lets a neighbour offer the right thing instead of guessing —
+          // the mirror of the "Make a trade offer" sheet on the other side.
+          if (compensation == 'barter') ...[
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: wanted,
+              maxLength: 160,
+              decoration: const InputDecoration(
+                labelText: 'In return, I would like (optional)',
+                helperText: 'e.g. 5 kg of rice, or an hour of plumbing help',
+              ),
+            ),
+          ],
           if (compensation == 'paid') ...[
             const SizedBox(height: 12),
             TextFormField(
