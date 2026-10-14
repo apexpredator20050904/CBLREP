@@ -586,6 +586,7 @@ class ApiService {
     required String purokSitio,
     String compensationType = 'barter',
     double? price,
+    String? wantedItem,
     File? image,
   }) async {
     final payload = <String, dynamic>{
@@ -602,6 +603,9 @@ class ApiService {
       'compensation_type': compensationType,
       // Only sent for a priced sale; free/barter never carry a figure.
       if (compensationType == 'paid' && price != null) 'price': price,
+      // Barter-only return side ("what I want in return").
+      if (compensationType == 'barter' && wantedItem != null && wantedItem.trim().isNotEmpty)
+        'wanted_item': wantedItem.trim(),
     };
     if (image != null) {
       payload['image'] = await MultipartFile.fromFile(

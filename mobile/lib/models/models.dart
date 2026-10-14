@@ -101,6 +101,10 @@ class ListingModel {
   final String type;
   final String compensationType;
   final String compensationLabel;
+
+  /// What the owner wants back — the return side of a barter. Null for free
+  /// and paid listings, which have no return side.
+  final String? wantedItem;
   final double? price;
   final String category;
   final String condition;
@@ -121,6 +125,7 @@ class ListingModel {
     required this.type,
     this.compensationType = 'barter',
     this.compensationLabel = 'BARTER',
+    this.wantedItem,
     this.price,
     required this.category,
     required this.condition,
@@ -139,6 +144,10 @@ class ListingModel {
   bool get isPaid => compensationType == 'paid';
   bool get isBarter => !isFree && !isPaid;
 
+  /// True when the owner named what they want back. Barter-only: free and paid
+  /// listings have no return side, so a stale payload cannot surface one.
+  bool get hasWantedItem => isBarter && (wantedItem?.isNotEmpty ?? false);
+
   factory ListingModel.fromJson(Map<String, dynamic> json) {
     final owner = json['owner'];
     final compensation = '${json['compensation_type'] ?? 'barter'}';
@@ -152,6 +161,7 @@ class ListingModel {
       compensationLabel: label ??
           { 'free': 'FREE SHARING', 'paid': 'PAID' }[compensation] ??
           'BARTER',
+      wantedItem: (json['wanted_item'] as String?)?.trim(),
       price: _asDouble(json['price']),
       category: (json['category'] ?? 'Tools') as String,
       condition: (json['condition'] ?? 'Good') as String,

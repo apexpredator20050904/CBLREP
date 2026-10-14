@@ -15,10 +15,21 @@ import 'package:untitled1/theme/cblrep_theme.dart';
 /// member opening a neighbour's listing saw "Close my listing" on an item
 /// they do not own, and tapping it only produced a confusing 404.
 ///
-/// Same screen, same class of bug: the "Message / Inquire" buttons let you
-/// open a chat with yourself. The backend 422s on that, but the buttons
-/// should not be offered either.
-ListingModel _listing({required int ownerId}) => ListingModel(
+/// Same screen, same class of bug: the contact buttons let you open a chat
+/// with yourself. The backend 422s on that, but the buttons should not be
+/// offered either.
+///
+/// The screen now has exactly one chat CTA plus — for barter listings only — a
+/// single "Make a trade offer" CTA. The old pair of chat buttons ("Message /
+/// Inquire" and "Start a negotiation") both opened the same thread, so a
+/// negative assertion on "Start a negotiation" is now what proves the
+/// redundancy is gone.
+ListingModel _listing({
+  required int ownerId,
+  String compensation = 'barter',
+  String? wantedItem,
+}) =>
+    ListingModel(
       id: 1,
       title: 'A borrowed drill',
       description: 'Works fine.',
@@ -31,9 +42,14 @@ ListingModel _listing({required int ownerId}) => ListingModel(
       owner: 'Maria',
       ownerId: ownerId,
       type: 'offer',
-      compensationType: 'barter',
-      compensationLabel: 'BARTER',
-      price: null,
+      compensationType: compensation,
+      compensationLabel: switch (compensation) {
+        'free' => 'FREE SHARING',
+        'paid' => 'PAID',
+        _ => 'BARTER',
+      },
+      wantedItem: wantedItem,
+      price: compensation == 'paid' ? 250 : null,
       active: true,
     );
 
@@ -85,8 +101,8 @@ void main() {
           reason: 'The poster must be able to close their own listing.');
       expect(find.text('Message / Inquire'), findsNothing,
           reason: 'You cannot message yourself.');
-      expect(find.text('Start a negotiation'), findsNothing,
-          reason: 'You cannot negotiate with yourself.');
+      expect(find.text('Make a trade offer'), findsNothing,
+          reason: 'You cannot trade with yourself.');
     });
 
     testWidgets('hides Close from a non-owner', (tester) async {
@@ -98,7 +114,50 @@ void main() {
           reason: 'Only the poster may close the listing.');
       expect(find.text('Message / Inquire'), findsOneWidget,
           reason: 'A non-owner must be able to reach the poster.');
-      expect(find.text('Start a negotiation'), findsOneWidget);
+      expect(find.text('Start a negotiation'), findsNothing,
+          reason: 'The second chat button was redundant and has been removed.');
+      expect(find.text('Make a trade offer'), findsOneWidget,
+          reason: 'A barter listing has a return side to offer.');
+    });
+
+    testWidgets('offers no trade button on a non-barter listing', (tester) async {
+      await useTallSurface(tester);
+      await tester.pumpWidget(_host(_listing(ownerId: ownerId, compensation: 'free'), _user(99)));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Message to claim'), findsOneWidget);
+      expect(find.text('Make a trade offer'), findsNothing,
+          reason: 'A free listing has no return side to trade for.');
+    });
+
+    testWidgets('Make a trade offer opens the proposal form', (tester) async {
+      await useTallSurface(tester);
+      await tester.pumpWidget(_host(
+        _listing(ownerId: ownerId, wantedItem: 'A sack of rice'),
+        _user(99),
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Make a trade offer'));
+      await tester.pumpAndSettle();
+
+      // The sheet names the owner's wish and asks for both halves of the
+      // trade, including the handover point.
+      expect(find.text('Owner wants: A sack of rice'), findsOneWidget);
+      expect(find.text('What you give in return'), findsOneWidget);
+      expect(find.text('Send offer'), findsOneWidget);
+    });
+
+    testWidgets('shows the owner\'s wish on the detail body', (tester) async {
+      await useTallSurface(tester);
+      await tester.pumpWidget(_host(
+        _listing(ownerId: ownerId, wantedItem: 'A sack of rice'),
+        _user(99),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Wants in return'), findsOneWidget);
+      expect(find.text('A sack of rice'), findsOneWidget);
     });
 
     testWidgets('hides Close when signed out', (tester) async {
