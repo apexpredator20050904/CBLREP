@@ -15,6 +15,10 @@ import 'package:untitled1/theme/cblrep_theme.dart';
 /// member opening a neighbour's listing saw "Close my listing" on an item
 /// they do not own, and tapping it only produced a confusing 404.
 ///
+/// The destructive "Close my listing" button has since been replaced by the
+/// reversible owner lifecycle panel (Pause / Mark as traded / Archive), which
+/// must likewise render for the owner only.
+///
 /// Same screen, same class of bug: the contact buttons let you open a chat
 /// with yourself. The backend 422s on that, but the buttons should not be
 /// offered either.
@@ -92,26 +96,30 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
     }
 
-    testWidgets('shows Close to the owner only', (tester) async {
+    testWidgets('shows owner lifecycle controls to the owner only', (tester) async {
       await useTallSurface(tester);
       await tester.pumpWidget(_host(_listing(ownerId: ownerId), _user(ownerId)));
       await tester.pumpAndSettle();
 
-      expect(find.text('Close my listing'), findsOneWidget,
-          reason: 'The poster must be able to close their own listing.');
+      expect(find.text('Pause'), findsOneWidget,
+          reason: 'The poster must be able to take their own listing down.');
+      expect(find.text('Archive'), findsOneWidget,
+          reason: 'The poster must be able to archive their own listing.');
       expect(find.text('Message / Inquire'), findsNothing,
           reason: 'You cannot message yourself.');
       expect(find.text('Make a trade offer'), findsNothing,
           reason: 'You cannot trade with yourself.');
     });
 
-    testWidgets('hides Close from a non-owner', (tester) async {
+    testWidgets('hides owner lifecycle controls from a non-owner', (tester) async {
       await useTallSurface(tester);
       await tester.pumpWidget(_host(_listing(ownerId: ownerId), _user(99)));
       await tester.pumpAndSettle();
 
-      expect(find.text('Close my listing'), findsNothing,
-          reason: 'Only the poster may close the listing.');
+      expect(find.text('Pause'), findsNothing,
+          reason: 'Only the poster may take the listing down.');
+      expect(find.text('Archive'), findsNothing,
+          reason: 'Only the poster may archive the listing.');
       expect(find.text('Message / Inquire'), findsOneWidget,
           reason: 'A non-owner must be able to reach the poster.');
       expect(find.text('Start a negotiation'), findsNothing,
@@ -160,12 +168,12 @@ void main() {
       expect(find.text('A sack of rice'), findsOneWidget);
     });
 
-    testWidgets('hides Close when signed out', (tester) async {
+    testWidgets('hides owner lifecycle controls when signed out', (tester) async {
       await useTallSurface(tester);
       await tester.pumpWidget(_host(_listing(ownerId: ownerId), null));
       await tester.pumpAndSettle();
 
-      expect(find.text('Close my listing'), findsNothing,
+      expect(find.text('Pause'), findsNothing,
           reason: 'A signed-out visitor is never the owner.');
       expect(find.text('Message / Inquire'), findsOneWidget);
     });
