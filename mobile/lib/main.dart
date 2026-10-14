@@ -5,12 +5,14 @@ import 'package:provider/provider.dart';
 import 'core/api_service.dart';
 import 'core/push_service.dart';
 import 'providers/app_settings_provider.dart';
+import 'providers/app_update_provider.dart';
 import 'providers/auth_provider.dart';
 import 'providers/chat_provider.dart';
 import 'providers/listings_provider.dart';
 import 'providers/live_hub_provider.dart';
 import 'theme/cblrep_theme.dart';
 import 'widgets/cblrep_shell.dart';
+import 'widgets/update_prompt.dart';
 import 'screens/login_screen.dart';
 
 Future<void> main() async {
@@ -45,6 +47,9 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ListingsProvider(ApiService.instance)),
         ChangeNotifierProvider(create: (_) => LiveHubProvider(ApiService.instance)),
         ChangeNotifierProvider(create: (_) => ChatProvider(ApiService.instance)),
+        ChangeNotifierProvider(
+          create: (_) => AppUpdateProvider(ApiService.instance)..load(),
+        ),
       ],
       child: Consumer<AppSettingsProvider>(
         builder: (context, settings, _) => MaterialApp(
@@ -53,7 +58,7 @@ class MyApp extends StatelessWidget {
           theme: CblrepTheme.lightCream,
           darkTheme: CblrepTheme.darkGreen,
           themeMode: settings.darkMode ? ThemeMode.dark : ThemeMode.light,
-          home: const AuthGate(),
+          home: const UpdatePromptHost(child: AuthGate()),
         ),
       ),
     );
