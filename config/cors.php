@@ -25,10 +25,16 @@ return [
     // Any HTTP verb the API exposes (GET, POST, PATCH, PUT, DELETE, OPTIONS).
     'allowed_methods' => ['*'],
 
-    // Explicit origins for the Vite dev server / preview on this machine.
-    // Private-LAN and loopback origins are already covered by the pattern
-    // below, so only the dev-server defaults are listed here.
+    // Explicit origins for the Vite dev server / preview on this machine,
+    // plus the production origins. The admin console is served from the same
+    // host as the API (https://api.cblrep.ph), so its calls are same-origin
+    // and never hit this list — the entries are here so the console still
+    // works if it is ever moved to the apex or another host.
+    //
+    // Private-LAN and loopback origins are covered by the pattern below.
     'allowed_origins' => [
+        'https://api.cblrep.ph',
+        'https://cblrep.ph',
         'http://localhost:5173',
         'http://127.0.0.1:5173',
     ],
