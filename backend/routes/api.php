@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\AdminPortalController;
 use App\Http\Controllers\Api\AdminTwoFactorController;
 use App\Http\Controllers\Api\AdminUserController;
 use App\Http\Controllers\Api\AnalyticsController;
+use App\Http\Controllers\Api\AppVersionController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ContentAdminController;
 use App\Http\Controllers\Api\ConversationController;
@@ -78,6 +79,10 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin/2fa')->group(functio
 Route::post('/forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:password-email');
 Route::post('/reset-password', [AuthController::class, 'resetPassword'])->middleware('throttle:password-reset');
 Route::get('/platform/status', [AdminPortalController::class, 'platformStatus']);
+
+// Mobile release channel. Unauthenticated so a stale build can learn about its
+// replacement before sign-in; the payload is non-sensitive release metadata.
+Route::get('/app-version', [AppVersionController::class, 'show']);
 
 // Public browse feed, used by the mobile home feed and the landing map.
 // Throttled because it is unauthenticated and, before pagination was added,
