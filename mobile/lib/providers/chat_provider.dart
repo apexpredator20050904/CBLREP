@@ -101,11 +101,7 @@ class ChatProvider extends ChangeNotifier {
   Future<void> sendAttachment(File file, {String caption = ''}) async {
     if (conversationId == null) return;
     final clean = InputSanitizer.text(caption, max: 2000);
-    final lower = file.path.toLowerCase();
-    final looksImage = lower.endsWith('.jpg') ||
-        lower.endsWith('.jpeg') ||
-        lower.endsWith('.png') ||
-        lower.endsWith('.webp');
+    final kind = _attachmentKind(file.path);
     final fileName = file.path.split(Platform.pathSeparator).last;
     messages = [...messages, {
       'id': 'local-${DateTime.now().millisecondsSinceEpoch}',
@@ -113,7 +109,7 @@ class ChatProvider extends ChangeNotifier {
       'sender_id': _selfId,
       'sender': 'You',
       'created_at': DateTime.now().toIso8601String(),
-      'file_type': looksImage ? 'image' : 'document',
+      'file_type': kind,
       'file_name': fileName,
       // Local preview path until the poll reconciles with the server copy.
       'file_url': file.path,
@@ -230,4 +226,25 @@ class ChatProvider extends ChangeNotifier {
     _timer?.cancel();
     super.dispose();
   }
+}
+
+/// Best-effort attachment kind from a file path, matching the backend's
+/// `file_type` vocabulary (`image` | `document` | `video`) so an optimistic
+/// bubble renders correctly before the server copy arrives.
+String _attachmentKind(String path) {
+  final lower = path.toLowerCase();
+  if (lower.endsWith('.jpg') ||
+      lower.endsWith('.jpeg') ||
+      lower.endsWith('.png') ||
+      lower.endsWith('.webp')) {
+    return 'image';
+  }
+  if (lower.endsWith('.mp4') ||
+      lower.endsWith('.mov') ||
+      lower.endsWith('.m4v') ||
+      lower.endsWith('.webm') ||
+      lower.endsWith('.3gp')) {
+    return 'video';
+  }
+  return 'document';
 }
