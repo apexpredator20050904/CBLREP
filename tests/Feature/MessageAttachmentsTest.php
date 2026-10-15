@@ -151,4 +151,76 @@ class MessageAttachmentsTest extends TestCase
             ->assertJsonPath('messages.0.file_type', 'document')
             ->assertJsonPath('messages.0.file_name', 'notes.pdf');
     }
+
+    public function test_sending_a_video_stores_it_and_marks_it_video(): void
+    {
+        Storage::fake('public');
+        $buyer = $this->user('Buyer '.uniqid(), 'buyer-'.uniqid().'@example.test');
+        $seller = $this->user('Seller '.uniqid(), 'seller-'.uniqid().'@example.test');
+        $conversation = $this->thread($buyer, $seller);
+
+        $response = $this->actingAs($buyer)->post(
+            "/api/conversations/{$conversation->id}/messages",
+            ['file' => UploadedFile::fake()->create('walkaround.mp4', 5000, 'video/mp4')]
+        );
+
+        $response->assertCreated();
+        $this->assertSame('video', $response->json('message.file_type'));
+        $this->assertSame('walkaround.mp4', $response->json('message.file_name'));
+        $this->assertNotEmpty($response->json('message.file_url'));
+
+        /** @var Message $stored */
+        $stored = Message::findOrFail($response->json('message.id'));
+        Storage::disk('public')->assertExists($stored->file_path);
+    }
+
+    public function test_a_mov_video_is_accepted(): void
+    {
+        Storage::fake('public');
+        $buyer = $this->user('Buyer '.uniqid(), 'buyer-'.uniqid().'@example.test');
+        $seller = $this->user('Seller '.uniqid(), 'seller-'.uniqid().'@example.test');
+        $conversation = $this->thread($buyer, $seller);
+
+        $this->actingAs($buyer)->post(
+            "/api/conversations/{$conversation->id}/messages",
+            ['file' => UploadedFile::fake()->create('clip.mov', 800, 'video/quicktime')]
+        )->assertCreated()->assertJsonPath('message.file_type', 'video');
+    }
+
+    public function test_a_video_over_the_50mb_cap_is_rejected(): void
+    {
+        Storage::fake('public');
+        $buyer = $this->user('Buyer '.uniqid(), 'buyer-'.uniqid().'@example.test');
+        $seller = $this->user('Seller '.uniqid(), 'seller-'.uniqid().'@example.test');
+        $conversation = $this->thread($buyer, $seller);
+
+        // 52000 KB is just above the 51200 KB (50 MB) ceiling.
+        $this->actingAs($buyer)->post(
+            "/api/conversations/{$conversation->id}/messages",
+            ['file' => UploadedFile::fake()->create('huge.mp4', 52000, 'video/mp4')]
+        )->assertStatus(422);
+    }
+
+    public function test_video_is_not_treated_as_an_image(): void
+    {
+        Storage::fake('public');
+        $buyer = $this->user('Buyer '.uniqid(), 'buyer-'.uniqid().'@example.test');
+        $seller = $this->user('Seller '.uniqid(), 'seller-'.uniqid().'@example.test');
+        $conversation = $this->thread($buyer, $seller);
+
+        $body = UploadedFile::fake()->create('clip.mp4', 400, 'video/mp4');
+        $response = $this->actingAs($buyer)->post(
+            "/api/conversations/{$conversation->id}/messages",
+            ['file' => $body]
+        );
+        $response->assertCreated();
+
+        // Look up by the returned id (not `latest()`) — this suite runs inside
+        // a transaction against the shared dev DB, so another message could
+        // have been inserted concurrently by the running app.
+        /** @var Message $stored */
+        $stored = Message::findOrFail($response->json('message.id'));
+        $this->assertTrue($stored->isVideo());
+        $this->assertFalse($stored->isImage());
+    }
 }

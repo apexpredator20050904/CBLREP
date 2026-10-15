@@ -21,6 +21,17 @@ use Illuminate\Http\Request;
  */
 class ConversationController extends Controller
 {
+    /**
+     * Attachment limits shared by both send endpoints (POST
+     * /conversations/{id}/messages and POST /messages) so the two never drift.
+     *
+     * `max` is in kilobytes (Laravel's file-size unit): 51200 KB = 50 MB, sized
+     * for short video clips. Allowed types are photos, documents and video.
+     */
+    private const ATTACHMENT_MAX_KB = 51200;
+
+    private const ATTACHMENT_MIMES = 'jpg,jpeg,png,webp,pdf,doc,docx,txt,mp4,mov,m4v,webm,3gp';
+
     public function index(Request $request)
     {
         $userId = $request->user()->id;
@@ -97,8 +108,8 @@ class ConversationController extends Controller
         $conversation = $this->ownedConversation($request, $id);
         $validated = $request->validate([
             'body' => ['nullable', 'string', 'max:5000'],
-            // Messenger-style attachments: photos + documents only.
-            'file' => ['nullable', 'file', 'max:10240', 'mimes:jpg,jpeg,png,webp,pdf,doc,docx,txt'],
+            // Messenger-style attachments: photos, documents + video clips.
+            'file' => ['nullable', 'file', 'max:'.self::ATTACHMENT_MAX_KB, 'mimes:'.self::ATTACHMENT_MIMES],
         ]);
 
         $body = trim((string) ($validated['body'] ?? ''));
@@ -131,18 +142,29 @@ class ConversationController extends Controller
     /**
      * Stores a chat attachment on the `public` disk under `chat_attachments/`
      * and returns the columns to persist on the message row.
+     *
+     * The type is resolved from the detected mime, falling back to the client
+     * extension because a test/mock upload can arrive as octet-stream while
+     * still carrying a .mp4 name.
      */
     private function storeAttachment(\Illuminate\Http\UploadedFile $file): array
     {
         $mime = (string) $file->getMimeType();
+        $extension = strtolower((string) $file->getClientOriginalExtension());
+
         $isImage = str_starts_with($mime, 'image/')
-            || in_array(strtolower((string) $file->getClientOriginalExtension()), ['jpg', 'jpeg', 'png', 'webp'], true);
+            || in_array($extension, ['jpg', 'jpeg', 'png', 'webp'], true);
+
+        $isVideo = ! $isImage && (
+            str_starts_with($mime, 'video/')
+            || in_array($extension, ['mp4', 'mov', 'm4v', 'webm', '3gp'], true)
+        );
 
         $path = $file->store('chat_attachments', 'public');
 
         return [
             'file_path' => $path,
-            'file_type' => $isImage ? 'image' : 'document',
+            'file_type' => $isImage ? 'image' : ($isVideo ? 'video' : 'document'),
             'file_name' => $file->getClientOriginalName(),
             'file_size' => $file->getSize(),
             'mime_type' => $mime ?: null,
@@ -237,8 +259,9 @@ class ConversationController extends Controller
      * POST /api/messages — direct send keyed on conversation_id.
      *
      * Supports multipart/form-data for Messenger-style attachments: text plus
-     * an optional photo (jpg/png/webp) or document (pdf/doc/docx/txt) stored
-     * under storage/app/public/chat_attachments. Ownership is enforced through
+     * an optional photo (jpg/png/webp), document (pdf/doc/docx/txt) or video
+     * clip (mp4/mov/m4v/webm/3gp, up to 50 MB) stored under
+     * storage/app/public/chat_attachments. Ownership is enforced through
      * the conversation lookup — non-participants get 404, never 403.
      */
     public function storeMessage(Request $request)
@@ -246,7 +269,7 @@ class ConversationController extends Controller
         $validated = $request->validate([
             'conversation_id' => ['required', 'integer', 'exists:conversations,id'],
             'body' => ['nullable', 'string', 'max:5000'],
-            'file' => ['nullable', 'file', 'max:10240', 'mimes:jpg,jpeg,png,webp,pdf,doc,docx,txt'],
+            'file' => ['nullable', 'file', 'max:'.self::ATTACHMENT_MAX_KB, 'mimes:'.self::ATTACHMENT_MIMES],
         ]);
 
         $conversation = $this->ownedConversation($request, (int) $validated['conversation_id']);

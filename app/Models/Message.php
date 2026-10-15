@@ -95,4 +95,9 @@ class Message extends Model
     {
         return $this->file_type === 'image';
     }
+
+    public function isVideo(): bool
+    {
+        return $this->file_type === 'video';
+    }
 }
