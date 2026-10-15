@@ -21,6 +21,12 @@ class ListingsProvider extends ChangeNotifier {
   /// rows the public feed hides. Populated by [loadMine].
   List<ListingModel> myListings = const [];
   Map<String, int> myCounts = const <String, int>{};
+
+  /// Progressive-trust posting envelope from `/api/my-listings`: `verified`,
+  /// `active_used`, and `active_max` (null = unlimited). Empty until the first
+  /// [loadMine], and read as "unlimited" so the Post screen never nags a
+  /// member whose real status we have not fetched yet.
+  Map<String, dynamic> myLimits = const <String, dynamic>{};
   bool myLoading = false;
 
   Timer? _pollTimer;
@@ -116,8 +122,11 @@ class ListingsProvider extends ChangeNotifier {
     required String purokSitio,
     String compensationType = 'barter',
     double? price,
+    bool priceNegotiable = false,
     String? wantedItem,
-    File? image,
+    double? latitude,
+    double? longitude,
+    List<File> images = const [],
   }) async {
     final created = await api.createListing(
       // Strip control characters and any HTML/script before it reaches MySQL.
@@ -126,17 +135,23 @@ class ListingsProvider extends ChangeNotifier {
       description: InputSanitizer.text(description, max: 2000),
       category: category,
       condition: condition,
-      location: InputSanitizer.name(location),
+      location: InputSanitizer.clean(location),
       barangay: barangay,
-      purokSitio: InputSanitizer.name(purokSitio),
+      purokSitio: InputSanitizer.clean(purokSitio),
       compensationType: compensationType,
       price: price,
+      // Paid-only: the seller welcomes a counter-offer.
+      priceNegotiable: priceNegotiable,
+      // Exact pin, when the poster dropped one.
+      latitude: latitude,
+      longitude: longitude,
       // Barter-only: the return side. Free/paid listings have none, and the
       // backend nulls it for them regardless.
       wantedItem: compensationType == 'barter' && (wantedItem?.isNotEmpty ?? false)
           ? InputSanitizer.text(wantedItem!, max: 160)
           : null,
-      image: image,
+      // Ordered photo gallery; the first becomes the cover.
+      images: images,
     );
     await load();
     return created;
@@ -160,6 +175,10 @@ class ListingsProvider extends ChangeNotifier {
       myCounts = counts is Map
           ? counts.map((k, v) => MapEntry('$k', (v as num?)?.toInt() ?? 0))
           : const <String, int>{};
+      final limits = data['limits'];
+      myLimits = limits is Map
+          ? Map<String, dynamic>.from(limits)
+          : const <String, dynamic>{};
       error = null;
     } on ApiException catch (exception) {
       error = exception.message;
@@ -169,6 +188,22 @@ class ListingsProvider extends ChangeNotifier {
       myLoading = false;
       notifyListeners();
     }
+  }
+
+  /// True when the signed-in member can post without an active-listing cap.
+  /// Unknown before the first [loadMine] — a missing envelope reads as
+  /// "unlimited" so the Post screen stays quiet until we actually know.
+  bool get postingIsUnlimited =>
+      myLimits['verified'] == true || myLimits['active_max'] == null;
+
+  /// The active-listing cap for an unverified member, or null when unlimited.
+  int? get activePostLimit => (myLimits['active_max'] as num?)?.toInt();
+
+  /// How many active listings already count against [activePostLimit].
+  int get activePostCount {
+    final used = myLimits['active_used'];
+    if (used is num) return used.toInt();
+    return myCounts['active'] ?? 0;
   }
 
   /// Move one of the member's own listings to a new lifecycle state

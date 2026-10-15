@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io' show Platform;
 
 import 'package:firebase_core/firebase_core.dart';
@@ -8,12 +9,48 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'api_service.dart';
 
-/// Android notification channel used both when the app shows a notification
-/// itself (foreground) and by FCM when the app is backgrounded/closed. The id
+/// Android notification channel used when the app shows a notification itself
+/// (foreground) and by FCM when the app is backgrounded/closed.
+///
+/// The app now creates one channel per category so a member can mute barter
+/// alerts at the OS level without also silencing chat. The ids must match the
+/// `CHANNELS` map in the backend `NotificationService`, and the *messages* id
 /// must match `com.google.firebase.messaging.default_notification_channel_id`
-/// in `AndroidManifest.xml`.
-const String kCblrepNotificationChannelId = 'cblrep_messages';
+/// in `AndroidManifest.xml` (the fallback FCM uses when a push arrives with no
+/// explicit channel).
+const String kCblrepChannelMessages = 'cblrep_messages';
+const String kCblrepChannelExchanges = 'cblrep_exchanges';
+const String kCblrepChannelAnnouncements = 'cblrep_announcements';
+const String kCblrepChannelAccount = 'cblrep_account';
+
+/// Backwards-compatible aliases for the original single channel.
+const String kCblrepNotificationChannelId = kCblrepChannelMessages;
 const String kCblrepNotificationChannelName = 'CBLREP updates';
+
+/// Display name + description per channel id.
+const Map<String, String> _channelNames = {
+  kCblrepChannelMessages: 'Messages',
+  kCblrepChannelExchanges: 'Barter activity',
+  kCblrepChannelAnnouncements: 'Announcements',
+  kCblrepChannelAccount: 'Account & verification',
+};
+
+const Map<String, String> _channelDescriptions = {
+  kCblrepChannelMessages: 'Chat messages and admin replies.',
+  kCblrepChannelExchanges: 'Barter requests, approvals and completions.',
+  kCblrepChannelAnnouncements: 'Barangay and municipal announcements.',
+  kCblrepChannelAccount: 'Verification decisions and listing moderation.',
+};
+
+/// Maps a backend `channel` value onto a channel this device actually created,
+/// falling back to the messages channel so a push is never dropped just because
+/// it names a channel the app does not know.
+String resolveChannelId(String? raw) =>
+    _channelNames.containsKey(raw) ? raw! : kCblrepChannelMessages;
+
+/// Human-friendly name for a resolved channel id.
+String channelNameFor(String id) =>
+    _channelNames[id] ?? _channelNames[kCblrepChannelMessages]!;
 
 /// Entry point for messages delivered while the app is backgrounded or closed.
 ///
@@ -95,16 +132,20 @@ class PushService {
   }
 
   Future<void> _createChannel() async {
-    const channel = AndroidNotificationChannel(
-      kCblrepNotificationChannelId,
-      kCblrepNotificationChannelName,
-      description: 'Messages and barter activity from CBLREP.',
-      importance: Importance.high,
-    );
-    await _local
+    final android = _local
         .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(channel);
+            AndroidFlutterLocalNotificationsPlugin>();
+
+    // One channel per category. createNotificationChannel is idempotent, so
+    // re-running on every launch is safe and picks up description changes.
+    for (final id in _channelNames.keys) {
+      await android?.createNotificationChannel(AndroidNotificationChannel(
+        id,
+        _channelNames[id]!,
+        description: _channelDescriptions[id],
+        importance: Importance.high,
+      ));
+    }
   }
 
   /// Pushes this device's FCM token to the backend for the signed-in member.
@@ -162,11 +203,12 @@ class PushService {
     final body = notification?.body ?? (message.data['body'] as String?) ?? '';
     if (title.isEmpty && body.isEmpty) return;
 
-    const details = NotificationDetails(
+    final channelId = resolveChannelId(message.data['channel']?.toString());
+    final details = NotificationDetails(
       android: AndroidNotificationDetails(
-        kCblrepNotificationChannelId,
-        kCblrepNotificationChannelName,
-        channelDescription: 'Messages and barter activity from CBLREP.',
+        channelId,
+        channelNameFor(channelId),
+        channelDescription: _channelDescriptions[channelId],
         importance: Importance.high,
         priority: Priority.high,
       ),
@@ -178,17 +220,34 @@ class PushService {
         title: title,
         body: body,
         notificationDetails: details,
-        payload: message.data['conversation_id']?.toString(),
+        // Carry the structured data so a future tap handler can deep-link into
+        // the right thread/listing. Kept as JSON so nothing is lost.
+        payload: _encodePayload(message.data),
       );
     } catch (e) {
       debugPrint('[CBLREP] failed to display push notification: $e');
     }
   }
 
+  /// Serialises an FCM data map to a JSON string payload (values are already
+  /// strings on the wire), dropping empties so the payload stays small.
+  static String? _encodePayload(Map<String, dynamic> data) {
+    final clean = <String, String>{};
+    data.forEach((key, value) {
+      if (value != null && value.toString().isNotEmpty) {
+        clean[key] = value.toString();
+      }
+    });
+    if (clean.isEmpty) return null;
+    return jsonEncode(clean);
+  }
+
   void _handleNotificationTap(RemoteMessage message) {
-    // The shell already refreshes notifications on resume/foreground; deep
-    // navigation into the exact thread can build on this hook later.
-    debugPrint('[CBLREP] notification opened: ${message.data}');
+    // The shell already refreshes notifications on resume/foreground; the
+    // payload now carries `type` + the relevant ids so a future release can
+    // deep-link into the exact thread/listing.
+    final type = message.data['type']?.toString();
+    debugPrint('[CBLREP] notification opened (type=$type): ${message.data}');
   }
 
   String get _platform => Platform.isAndroid ? 'android' : 'ios';

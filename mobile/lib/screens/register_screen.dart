@@ -124,7 +124,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               validator: (v) {
                 final t = (v ?? '').trim();
                 if (t.isEmpty) return 'Enter your purok or sitio';
-                if (!t.startsWith('Purok') && !t.startsWith('Sitio')) return 'Use a format like "Purok 3" or "Sitio Name"';
+                if (!isValidPurokSitio(t)) return 'Use a format like "Purok 3" or "Sitio Name"';
                 return null;
               },
             ),

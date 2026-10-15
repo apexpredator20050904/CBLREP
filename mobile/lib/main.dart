@@ -40,7 +40,8 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => AppSettingsProvider()..load()),
+        ChangeNotifierProvider(
+            create: (_) => AppSettingsProvider(ApiService.instance)..load()),
         ChangeNotifierProvider(
           create: (_) => AuthProvider(ApiService.instance)..restore(),
         ),

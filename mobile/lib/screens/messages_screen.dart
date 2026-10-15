@@ -4,6 +4,7 @@ import '../models/models.dart';
 import '../providers/live_hub_provider.dart';
 import '../theme/cblrep_theme.dart';
 import '../widgets/empty_state.dart';
+import '../widgets/user_avatar.dart';
 import 'chat_screen.dart';
 
 /// Secure in-app messaging inbox — live conversation list.
@@ -47,7 +48,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
                       margin: const EdgeInsets.only(bottom: 10),
                       decoration: BoxDecoration(color: dark ? CblrepColors.darkCardGreen : Colors.white, borderRadius: BorderRadius.circular(12)),
                       child: ListTile(
-                        leading: CircleAvatar(backgroundColor: CblrepColors.brandGreen, child: Text(c.memberName.isEmpty ? '?' : c.memberName.characters.take(1).toString().toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                        leading: UserAvatar(imageUrl: c.memberAvatarUrl, name: c.memberName),
                         title: Text(c.memberName, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: dark ? Colors.white : Colors.black)),
                         subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                           if (c.hasListing)

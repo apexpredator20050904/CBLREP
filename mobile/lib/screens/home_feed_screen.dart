@@ -65,6 +65,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
     // Granular selects: this screen rebuilds only when a rendered value
     // actually changes — plain watches re-fired on every 20s live poll.
     final memberName = context.select<AuthProvider, String>((p) => p.user?.name ?? 'member');
+    final memberAvatar = context.select<AuthProvider, String?>((p) => p.user?.avatarUrl);
     final loading = context.select<ListingsProvider, bool>((p) => p.loading);
     final loadError = context.select<ListingsProvider, String?>((p) => p.error);
     final listings = context.select<ListingsProvider, List<ListingModel>>((p) => p.listings);
@@ -102,7 +103,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                   subtitle: Text(maintenanceMessage),
                 ),
               ),
-            WelcomeHeader(name: memberName, subtitle: '$communityName · by barangay & purok'),
+            WelcomeHeader(name: memberName, subtitle: '$communityName · by barangay & purok', avatarUrl: memberAvatar),
             const SizedBox(height: 12),
             TextField(
               controller: search,

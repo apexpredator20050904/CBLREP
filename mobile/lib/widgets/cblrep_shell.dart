@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../providers/app_settings_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/live_hub_provider.dart';
 import '../screens/create_listing_screen.dart';
@@ -48,6 +49,9 @@ class _CblrepShellState extends State<CblrepShell> {
     // here and put the member back on the sign-in form instead.
     _auth = context.read<AuthProvider>()..addListener(_onAuthChanged);
     Future.microtask(_hub.startLive);
+    // Adopt this member's server-stored notification toggles (or seed them
+    // from the device on first run) now that we are authenticated.
+    Future.microtask(() => context.read<AppSettingsProvider>().syncWithServer());
   }
 
   void _onAuthChanged() {

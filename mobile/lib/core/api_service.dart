@@ -551,6 +551,24 @@ class ApiService {
     throw last ?? const ApiException('Profile update is not available yet.');
   }
 
+  /// POST /user/avatar — upload or replace the member's profile photo.
+  /// Multipart, because the payload is a binary file.
+  Future<Map<String, dynamic>> uploadAvatar(File file) async {
+    final form = FormData.fromMap({
+      'avatar': await MultipartFile.fromFile(
+        file.path,
+        filename: file.path.split(Platform.pathSeparator).last,
+      ),
+    });
+    return Map<String, dynamic>.from(
+        await _request(_dio.post('/user/avatar', data: form)) as Map);
+  }
+
+  /// DELETE /user/avatar — remove the member's profile photo.
+  Future<Map<String, dynamic>> removeAvatar() async =>
+      Map<String, dynamic>.from(
+          await _request(_dio.delete('/user/avatar')) as Map);
+
   Future<Map<String, dynamic>> verificationStatus() async {
     try {
       return Map<String, dynamic>.from(await _request(_dio.get('/user/verification-status')) as Map);
@@ -586,8 +604,11 @@ class ApiService {
     required String purokSitio,
     String compensationType = 'barter',
     double? price,
+    bool priceNegotiable = false,
     String? wantedItem,
-    File? image,
+    double? latitude,
+    double? longitude,
+    List<File> images = const [],
   }) async {
     final payload = <String, dynamic>{
       'title': title,
@@ -599,22 +620,41 @@ class ApiService {
       'location': location,
       'barangay': barangay,
       'purok_sitio': purokSitio,
+      // Exact point, when the poster pinned one. Omitted otherwise so the
+      // backend keeps its barangay-anchor fallback.
+      'latitude': ?latitude,
+      'longitude': ?longitude,
       // free | barter | paid — the flexible compensation model.
       'compensation_type': compensationType,
       // Only sent for a priced sale; free/barter never carry a figure.
       if (compensationType == 'paid' && price != null) 'price': price,
+      // Paid-only: whether the seller welcomes a counter-offer. Sent as 1/0
+      // because multipart stringifies a Dart bool to "true"/"false", which the
+      // backend's `boolean` rule rejects.
+      if (compensationType == 'paid')
+        'price_negotiable': priceNegotiable ? 1 : 0,
       // Barter-only return side ("what I want in return").
       if (compensationType == 'barter' && wantedItem != null && wantedItem.trim().isNotEmpty)
         'wanted_item': wantedItem.trim(),
     };
-    if (image != null) {
-      payload['image'] = await MultipartFile.fromFile(
-        image.path,
-        filename: image.path.split(Platform.pathSeparator).last,
-      );
+    // Build the multipart body by hand so the photo gallery is sent as repeated
+    // `images[]` fields, which Laravel parses into the `images` array. The first
+    // photo becomes the listing's cover.
+    final formData = FormData();
+    payload.forEach((key, value) {
+      if (value != null) formData.fields.add(MapEntry(key, value.toString()));
+    });
+    for (final file in images) {
+      formData.files.add(MapEntry(
+        'images[]',
+        await MultipartFile.fromFile(
+          file.path,
+          filename: file.path.split(Platform.pathSeparator).last,
+        ),
+      ));
     }
     return Map<String, dynamic>.from(await _request(
-      _dio.post('/listings', data: FormData.fromMap(payload)),
+      _dio.post('/listings', data: formData),
     ) as Map);
   }
 
@@ -740,6 +780,21 @@ class ApiService {
   Future<void> deleteDeviceToken(String token) async {
     await _request(_dio.delete('/device-tokens', data: {'token': token}));
   }
+
+  // ── Push notification preferences (server-side mirror of Settings) ────
+  /// GET /notification-preferences — the member's effective toggles plus a
+  /// `configured` flag telling the app whether the server holds an explicit
+  /// choice yet (so a first run can seed it from the device).
+  Future<Map<String, dynamic>> notificationPreferences() async =>
+      Map<String, dynamic>.from(
+          await _request(_dio.get('/notification-preferences')) as Map);
+
+  /// PUT /notification-preferences — persist the toggles so the server can gate
+  /// the FCM pushes only it can send. Partial maps are merged server-side.
+  Future<Map<String, dynamic>> updateNotificationPreferences(
+          Map<String, bool> preferences) async =>
+      Map<String, dynamic>.from(await _request(
+          _dio.put('/notification-preferences', data: preferences)) as Map);
 
   // ── Conversations / secure in-app messaging ──────────────────────────
   Future<List<dynamic>> conversations() async {

@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
+import 'package:untitled1/core/api_service.dart';
 import 'package:untitled1/models/models.dart';
+import 'package:untitled1/providers/auth_provider.dart';
+import 'package:untitled1/providers/listings_provider.dart';
 import 'package:untitled1/screens/create_listing_screen.dart';
 import 'package:untitled1/theme/cblrep_theme.dart';
 
@@ -57,7 +61,29 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
     }
 
-    Widget host() => MaterialApp(theme: CblrepTheme.lightCream, home: const CreateListingScreen());
+    Widget host() => MultiProvider(
+          providers: [
+            // The Post screen reads AuthProvider (verification state) and
+            // ListingsProvider (the active-listing cap envelope). A verified
+            // member keeps initState from fetching the cap over the network.
+            ChangeNotifierProvider(
+              create: (_) => AuthProvider(ApiService.instance)
+                ..user = const UserModel(
+                  id: 1,
+                  name: 'Verified Tester',
+                  email: 'verified@example.test',
+                  barangay: 'Poblacion',
+                  purokSitio: 'Purok 3',
+                  verified: true,
+                  verificationStatus: 'Verified',
+                ),
+            ),
+            ChangeNotifierProvider(
+              create: (_) => ListingsProvider(ApiService.instance),
+            ),
+          ],
+          child: MaterialApp(theme: CblrepTheme.lightCream, home: const CreateListingScreen()),
+        );
 
     testWidgets('asks for the return wish by default (barter)', (tester) async {
       await useTallSurface(tester);

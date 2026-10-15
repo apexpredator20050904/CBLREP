@@ -98,7 +98,9 @@ class _VerificationScreenState extends State<VerificationScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final status = context.watch<AuthProvider>().user?.verificationStatus ?? 'Unverified';
+    final auth = context.watch<AuthProvider>();
+    final status = auth.user?.verificationStatus ?? 'Unverified';
+    final hasPhoto = auth.user?.avatarUrl?.isNotEmpty ?? false;
     final dark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       appBar: AppBar(title: const Text('Residency verification')),
@@ -106,6 +108,27 @@ class _VerificationScreenState extends State<VerificationScreen> {
         _StatusBanner(status: status),
         const SizedBox(height: 16),
         Text('Submit a document proving your residency in Trinidad, Bohol. An administrator will review it in the Verification queue.', style: TextStyle(color: dark ? Colors.white70 : Colors.black54)),
+        // Encouraged, never required: a profile photo helps neighbours (and
+        // the reviewing admin) recognise the member, but verification is about
+        // the residency document.
+        if (!hasPhoto)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(Icons.lightbulb_outline, size: 16, color: dark ? Colors.white54 : Colors.black45),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Tip: add a profile photo from your Profile page so neighbours recognise you. It is optional and not required for verification.',
+                  style: TextStyle(fontSize: 11, color: dark ? Colors.white54 : Colors.black45),
+                ),
+              ),
+            ]),
+          ),
+        if (status != 'Verified') ...[
+          const SizedBox(height: 16),
+          const _VerificationBenefits(),
+        ],
         const SizedBox(height: 16),
         DropdownButtonFormField(initialValue: barangay, decoration: const InputDecoration(labelText: 'Barangay'), items: trinidadBarangays.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(), onChanged: (value) => setState(() => barangay = value!)),
         const SizedBox(height: 12),
@@ -146,6 +169,51 @@ class _StatusBanner extends StatelessWidget {
         Icon(icon, color: color, size: 20),
         const SizedBox(width: 10),
         Expanded(child: Text('Current status: $status', style: TextStyle(fontWeight: FontWeight.bold, color: color))),
+      ]),
+    );
+  }
+}
+
+/// What a member actually gets once an admin confirms their residency — shown
+/// while they are still unverified, so the ask ("submit a document") carries a
+/// visible payoff.
+class _VerificationBenefits extends StatelessWidget {
+  const _VerificationBenefits();
+
+  static const List<(IconData, String)> _benefits = [
+    (Icons.verified_user, 'A "Verified resident" badge on your profile and listings.'),
+    (Icons.trending_up, 'Your listings are shown first in the browse feed.'),
+    (Icons.all_inclusive, 'Post as many listings as you like — the unverified posting limit is lifted.'),
+    (Icons.campaign_outlined, 'Barangay announcements targeted to verified residents.'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: dark ? CblrepColors.darkCardGreen : const Color(0xFFF1FAF3),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: CblrepColors.successGreen.withValues(alpha: 0.35)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Why get verified?', style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        for (final (icon, text) in _benefits)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(icon, size: 16, color: CblrepColors.successGreen),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  text,
+                  style: TextStyle(fontSize: 12, color: dark ? Colors.white70 : Colors.black54),
+                ),
+              ),
+            ]),
+          ),
       ]),
     );
   }

@@ -8,6 +8,8 @@ import '../models/models.dart';
 import '../providers/auth_provider.dart';
 import '../providers/listings_provider.dart';
 import '../theme/cblrep_theme.dart';
+import '../widgets/user_avatar.dart';
+import '../widgets/verified_badge.dart';
 import 'chat_screen.dart';
 import 'login_screen.dart';
 
@@ -131,8 +133,9 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
   /// This replaces the old pair of buttons that both opened the same chat
   /// ("Message / Inquire" and "Start a negotiation"). A tailored opener is
   /// seeded only on a brand-new thread, so returning to an ongoing
-  /// conversation never re-injects a greeting.
-  Future<void> _contactOwner() async {
+  /// conversation never re-injects a greeting. [opener] overrides that default
+  /// (used by "Make an offer", which names the buyer's price).
+  Future<void> _contactOwner({String? opener}) async {
     if (widget.listing.ownerId <= 0) {
       if (mounted) {
         Feedback.info(context, 'Owner chat is unavailable for this listing.');
@@ -162,7 +165,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
           builder: (_) => ChatScreen(
             conversationId: id,
             title: widget.listing.owner,
-            initialDraft: isNewThread ? _suggestedOpener(widget.listing) : null,
+            initialDraft: isNewThread ? (opener ?? _suggestedOpener(widget.listing)) : null,
           ),
         ),
       );
@@ -207,6 +210,32 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     }
   }
 
+  /// Paid + negotiable: let a buyer name a price without haggling blind.
+  ///
+  /// The offer is sent as the first message of the listing's own thread. The
+  /// Exchange model is deliberately a two-sided barter (see App\Models\Exchange),
+  /// so a monetary counter-offer is — correctly — a conversation the owner can
+  /// answer, not a recorded exchange.
+  Future<void> _makeOffer() async {
+    if (widget.listing.ownerId <= 0) {
+      if (mounted) Feedback.info(context, 'Owner chat is unavailable for this listing.');
+      return;
+    }
+    if (!await _ensureSignedIn('make an offer for this listing')) return;
+    if (!mounted) return;
+    final amount = await showDialog<double>(
+      context: context,
+      builder: (_) => _OfferDialog(listedPrice: widget.listing.price),
+    );
+    if (amount == null || !mounted) return;
+    final formatted = amount == amount.roundToDouble()
+        ? amount.toStringAsFixed(0)
+        : amount.toStringAsFixed(2);
+    await _contactOwner(
+      opener: 'Hi! I would like to offer ₱$formatted for "${widget.listing.title}". Would that work?',
+    );
+  }
+
   /// Primary CTA wording depends on how the owner wants to share.
   String get _inquireLabel => switch (widget.listing.compensationType) {
         'free' => 'Message to claim',
@@ -229,12 +258,11 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
       backgroundColor: dark ? CblrepColors.deepForest : null,
       appBar: AppBar(title: const Text('Item details', style: TextStyle(fontSize: 16))),
       body: ListView(padding: const EdgeInsets.all(16), children: [
-        Container(
-          height: 200,
-          decoration: BoxDecoration(color: const Color(0xFF9AA5A0), borderRadius: BorderRadius.circular(14)),
-          child: listing.imageUrl != null
-              ? ClipRRect(borderRadius: BorderRadius.circular(14), child: Image.network(listing.imageUrl!, fit: BoxFit.cover, errorBuilder: (_, _, _) => Icon(need ? Icons.help_outline : Icons.volunteer_activism, size: 72, color: Colors.white54)))
-              : Icon(need ? Icons.help_outline : Icons.volunteer_activism, size: 72, color: Colors.white54),
+        _ListingGallery(
+          images: listing.imageUrls.isNotEmpty
+              ? listing.imageUrls
+              : (listing.imageUrl != null ? [listing.imageUrl!] : const []),
+          placeholderIcon: need ? Icons.help_outline : Icons.volunteer_activism,
         ),
         const SizedBox(height: 12),
         Container(
@@ -269,8 +297,22 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
             Text('${listing.category} · ${listing.condition}', style: TextStyle(fontSize: 12, color: dark ? Colors.white70 : Colors.black54)),
             if (listing.isPaid && listing.price != null) ...[
               const SizedBox(height: 6),
-              Text('₱${listing.price!.toStringAsFixed(listing.price == listing.price!.roundToDouble() ? 0 : 2)}',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: CblrepColors.compPaid)),
+              Row(children: [
+                Text('₱${listing.price!.toStringAsFixed(listing.price == listing.price!.roundToDouble() ? 0 : 2)}',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: CblrepColors.compPaid)),
+                if (listing.isNegotiable) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: CblrepColors.compPaid.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text('Negotiable',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: CblrepColors.compPaid)),
+                  ),
+                ],
+              ]),
             ],
             const SizedBox(height: 8),
             Text(listing.description.isEmpty ? 'No description provided.' : listing.description, style: TextStyle(fontSize: 13, color: dark ? Colors.white : Colors.black87)),
@@ -288,7 +330,45 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
             // Author on its own row with the label outside the flexible area,
             // so a long name truncates inside the remaining width rather than
             // overlapping the icon or the card edge.
-            _row(Icons.person_outline, listing.owner, label: 'Posted by'),
+            // Author with their photo and (when confirmed) a verified tick, so
+            // a member can size up who they are dealing with at a glance.
+            Builder(builder: (context) {
+              final rowDark = Theme.of(context).brightness == Brightness.dark;
+              final rowMuted = rowDark ? Colors.white60 : Colors.black45;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    UserAvatar(
+                      imageUrl: listing.ownerAvatarUrl,
+                      name: listing.owner,
+                      radius: 14,
+                    ),
+                    const SizedBox(width: 8),
+                    Text('Posted by', style: TextStyle(fontSize: 12, color: rowMuted)),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        listing.owner,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: rowDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                    ),
+                  ]),
+                  // The verification payoff, spelled out. On its own line so a
+                  // long owner name can never push it off the card edge.
+                  if (listing.ownerVerified) ...[
+                    const SizedBox(height: 6),
+                    const VerifiedBadge(),
+                  ],
+                ]),
+              );
+            }),
           ]),
         ),
         const SizedBox(height: 12),
@@ -319,6 +399,19 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                 onPressed: _openTradeOffer,
                 icon: const Icon(Icons.swap_horiz, size: 18),
                 label: const Text('Make a trade offer'),
+              ),
+            ),
+          ],
+          // Paid + negotiable: name a price up front instead of haggling blind.
+          if (listing.isNegotiable) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 44,
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _makeOffer,
+                icon: const Icon(Icons.local_offer_outlined, size: 18),
+                label: const Text('Make an offer'),
               ),
             ),
           ],
@@ -659,7 +752,7 @@ class _TradeOfferSheetState extends State<_TradeOfferSheet> {
       return 'Describe what you will offer in return.';
     }
     final purok = _purok.text.trim();
-    if (purok.isEmpty || (!purok.startsWith('Purok') && !purok.startsWith('Sitio'))) {
+    if (purok.isEmpty || !isValidPurokSitio(purok)) {
       return 'Enter a pick-up point like "Purok 3" or "Sitio Name".';
     }
     return null;
@@ -815,6 +908,176 @@ class _TradeOfferSheetState extends State<_TradeOfferSheet> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// A tiny dialog for naming a price on a negotiable listing. Returns the parsed
+/// amount, or null when the buyer backs out. It never sends anything itself —
+/// the caller turns the amount into the chat opener, so the offer flows through
+/// the same listing-scoped thread as every other inquiry.
+class _OfferDialog extends StatefulWidget {
+  final double? listedPrice;
+  const _OfferDialog({this.listedPrice});
+
+  @override
+  State<_OfferDialog> createState() => _OfferDialogState();
+}
+
+class _OfferDialogState extends State<_OfferDialog> {
+  late final TextEditingController _amount = TextEditingController(
+    text: widget.listedPrice == null
+        ? ''
+        : (widget.listedPrice == widget.listedPrice!.roundToDouble()
+            ? widget.listedPrice!.toStringAsFixed(0)
+            : widget.listedPrice!.toStringAsFixed(2)),
+  );
+  String? _error;
+
+  @override
+  void dispose() {
+    _amount.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final parsed = double.tryParse(_amount.text.trim());
+    if (parsed == null || parsed <= 0) {
+      setState(() => _error = 'Enter an amount greater than zero.');
+      return;
+    }
+    Navigator.pop(context, parsed);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    String money(double v) =>
+        '₱${v.toStringAsFixed(v == v.roundToDouble() ? 0 : 2)}';
+    return AlertDialog(
+      title: const Text('Make an offer', style: TextStyle(fontSize: 16)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (widget.listedPrice != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Text(
+                'Listed at ${money(widget.listedPrice!)}. Your offer is sent to the seller as a chat message.',
+                style: TextStyle(fontSize: 12, color: Theme.of(context).brightness == Brightness.dark ? Colors.white70 : Colors.black54),
+              ),
+            ),
+          TextField(
+            controller: _amount,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: 'Your offer (₱)',
+              prefixText: '₱ ',
+              errorText: _error,
+            ),
+            onSubmitted: (_) => _submit(),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(onPressed: _submit, child: const Text('Send offer')),
+      ],
+    );
+  }
+}
+
+/// The listing's photo gallery.
+///
+/// One photo renders much like before; several become a swipeable pager with a
+/// position badge and dots, so a buyer can judge an item's condition from every
+/// angle without leaving the screen. No photos falls back to the placeholder
+/// icon the detail screen always used.
+class _ListingGallery extends StatefulWidget {
+  final List<String> images;
+  final IconData placeholderIcon;
+  const _ListingGallery({required this.images, required this.placeholderIcon});
+
+  @override
+  State<_ListingGallery> createState() => _ListingGalleryState();
+}
+
+class _ListingGalleryState extends State<_ListingGallery> {
+  final PageController _controller = PageController();
+  int _index = 0;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.images.isEmpty) {
+      return Container(
+        height: 200,
+        decoration: BoxDecoration(color: const Color(0xFF9AA5A0), borderRadius: BorderRadius.circular(14)),
+        child: Icon(widget.placeholderIcon, size: 72, color: Colors.white54),
+      );
+    }
+
+    return SizedBox(
+      height: 200,
+      child: Stack(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: PageView.builder(
+              controller: _controller,
+              itemCount: widget.images.length,
+              onPageChanged: (i) => setState(() => _index = i),
+              itemBuilder: (_, i) => Image.network(
+                widget.images[i],
+                fit: BoxFit.cover,
+                width: double.infinity,
+                errorBuilder: (_, _, _) => Container(
+                  color: const Color(0xFF9AA5A0),
+                  child: Icon(widget.placeholderIcon, size: 72, color: Colors.white54),
+                ),
+              ),
+            ),
+          ),
+          if (widget.images.length > 1) ...[
+            Positioned(
+              top: 8,
+              right: 8,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
+                child: Text('${_index + 1}/${widget.images.length}',
+                    style: const TextStyle(color: Colors.white, fontSize: 11)),
+              ),
+            ),
+            Positioned(
+              bottom: 8,
+              left: 0,
+              right: 0,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  for (var i = 0; i < widget.images.length; i++)
+                    Container(
+                      width: 7,
+                      height: 7,
+                      margin: const EdgeInsets.symmetric(horizontal: 3),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: i == _index ? Colors.white : Colors.white54,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

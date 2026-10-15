@@ -12,7 +12,7 @@ import 'package:untitled1/widgets/listing_card.dart';
 /// Builds a listing with deliberately hostile text — long author name, long
 /// purok/sitio, long title — which is what previously drove the card and the
 /// detail header past their bounds.
-ListingModel _hostile({String type = 'offer', String compensation = 'paid'}) {
+ListingModel _hostile({String type = 'offer', String compensation = 'paid', bool verified = false}) {
   return ListingModel(
     id: 1,
     title: 'Vintage wooden dining table with six matching chairs and a hand-carved '
@@ -26,6 +26,7 @@ ListingModel _hostile({String type = 'offer', String compensation = 'paid'}) {
     imageUrl: null,
     owner: 'Maria Concepcion Dela Cruz Santos Jr.',
     ownerId: 7,
+    ownerVerified: verified,
     type: type,
     compensationType: compensation,
     compensationLabel: compensation == 'paid'
@@ -106,6 +107,17 @@ void main() {
       expect(find.textContaining('Manuel M. Roxas'), findsOneWidget);
       expect(find.textContaining('PAID'), findsOneWidget);
     });
+
+    testWidgets('shows the verified tick only for a verified owner',
+        (tester) async {
+      await tester.pumpWidget(_host(_hostile(verified: true), 200));
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.verified), findsOneWidget);
+
+      await tester.pumpWidget(_host(_hostile(), 200));
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.verified), findsNothing);
+    });
   });
 
   group('ListingDetailScreen layout', () {
@@ -130,6 +142,18 @@ void main() {
       expect(find.text('NEED'), findsOneWidget);
       expect(find.textContaining('FREE SHARING'), findsOneWidget);
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('shows the labelled verified badge only for a verified owner',
+        (tester) async {
+      await tester.pumpWidget(_detailHost(_hostile(verified: true)));
+      await tester.pumpAndSettle();
+      expect(find.text('Verified resident'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(_detailHost(_hostile()));
+      await tester.pumpAndSettle();
+      expect(find.text('Verified resident'), findsNothing);
     });
   });
 }

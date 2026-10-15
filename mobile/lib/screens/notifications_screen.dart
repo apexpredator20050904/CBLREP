@@ -80,8 +80,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   Color _colorFor(String type) {
     switch (type) {
       case 'message': return CblrepColors.brandGreen;
-      case 'exchange_request': return CblrepColors.actionOrange;
+      case 'exchange_request':
+      case 'exchange_update': return CblrepColors.actionOrange;
       case 'verification': return CblrepColors.avatarAmber;
+      case 'announcement': return CblrepColors.fieldGreen;
+      case 'listing':
+      case 'account': return CblrepColors.deepForest;
       default: return CblrepColors.fieldGreen;
     }
   }
@@ -89,8 +93,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   IconData _iconFor(String type) {
     switch (type) {
       case 'message': return Icons.chat_bubble_outline;
-      case 'exchange_request': return Icons.swap_horiz;
+      case 'exchange_request':
+      case 'exchange_update': return Icons.swap_horiz;
       case 'verification': return Icons.verified_outlined;
+      case 'announcement': return Icons.campaign_outlined;
+      case 'listing': return Icons.inventory_2_outlined;
+      case 'account': return Icons.manage_accounts_outlined;
       default: return Icons.notifications_outlined;
     }
   }

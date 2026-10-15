@@ -80,3 +80,41 @@ double distanceKm(double lat1, double lng1, double lat2, double lng2) {
   return 2 * earthRadius * asin(sqrt(a.toDouble()));
 }
 
+/// Whether [value] is a purok/sitio the API will accept.
+///
+/// Mirrors App\Support\Puroks on the server: the value must open with the
+/// designation "Purok" or "Sitio" — in any casing — followed by a name, may
+/// contain Unicode letters (so real names such as "Sitio Peña" or
+/// "Sitio Sto. Niño" pass), and must not carry municipal scope. Checking here
+/// saves a member a round trip that would only answer 422.
+bool isValidPurokSitio(String value) {
+  final v = value.trim();
+  if (v.length < 3 || v.length > 60) return false;
+  final designation =
+      RegExp(r'^(purok|sitio)\s+\S', caseSensitive: false, unicode: true);
+  if (!designation.hasMatch(v)) return false;
+  final municipalScope = RegExp(
+    r'barangay|trinidad|bohol|municipal|city|province',
+    caseSensitive: false,
+  );
+  return !municipalScope.hasMatch(v);
+}
+
+/// Fold user input into the canonical form the API stores, so the client can
+/// echo "Purok 3" however the member typed it ("purok  3", "PUROK 3",
+/// "Purok3"). The name after the designation is left as typed.
+String canonicalizePurokSitio(String value) {
+  var v = value.replaceAll(RegExp(r'[\s\u00A0\u202F]+'), ' ').trim();
+  if (v.isEmpty) return v;
+  // Re-attach a dropped separator ("Purok3"), then restore the designation's
+  // proper casing.
+  v = v.replaceFirstMapped(
+    RegExp(r'^(purok|sitio)(?=[\p{L}\p{N}])', caseSensitive: false, unicode: true),
+    (m) => '${m[1]} ',
+  );
+  return v.replaceFirstMapped(
+    RegExp(r'^(purok|sitio)\b', caseSensitive: false, unicode: true),
+    (m) => m[1]![0].toUpperCase() + m[1]!.substring(1).toLowerCase(),
+  );
+}
+

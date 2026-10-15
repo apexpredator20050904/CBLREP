@@ -71,6 +71,13 @@ class SettingsScreen extends StatelessWidget {
               activeColor: CblrepColors.actionOrange,
               onChanged: settings.notificationsEnabled ? (v) => settings.setMessageAlerts(v) : null,
             ),
+            SwitchListTile(
+              title: const Text('Announcements'),
+              subtitle: const Text('Barangay and municipal broadcasts'),
+              value: settings.announcementAlerts,
+              activeColor: CblrepColors.actionOrange,
+              onChanged: settings.notificationsEnabled ? (v) => settings.setAnnouncementAlerts(v) : null,
+            ),
           ]),
           _section(context, 'Account', [
             ListTile(
