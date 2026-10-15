@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\DeviceTokenController;
 use App\Http\Controllers\Api\ExchangeController;
 use App\Http\Controllers\Api\ListingController;
 use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\Api\NotificationPreferenceController;
 use App\Http\Controllers\Api\VerificationReportsController;
 use Illuminate\Support\Facades\Route;
 
@@ -109,6 +110,10 @@ Route::middleware('auth:sanctum')->group(function () {
     // Session
     Route::get('/user', [AuthController::class, 'me']);
     Route::patch('/user', [AuthController::class, 'updateProfile']);
+    // Profile photo: a dedicated multipart endpoint (upload/replace) and a
+    // delete that falls the member back to their initials avatar.
+    Route::post('/user/avatar', [AuthController::class, 'updateAvatar']);
+    Route::delete('/user/avatar', [AuthController::class, 'destroyAvatar']);
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::post('/verification', [AuthController::class, 'submitVerification']);
     Route::get('/user/verification-status', [AuthController::class, 'verificationStatus']);
@@ -159,6 +164,11 @@ Route::middleware('auth:sanctum')->group(function () {
     // Member announcements and action notifications.
     Route::get('/notifications', [NotificationController::class, 'index']);
     Route::put('/notifications/{id}/read', [NotificationController::class, 'read']);
+
+    // Push-notification preferences (the server-side mirror of the mobile
+    // Settings toggles; only the server can actually gate an FCM send).
+    Route::get('/notification-preferences', [NotificationPreferenceController::class, 'show']);
+    Route::put('/notification-preferences', [NotificationPreferenceController::class, 'update']);
 
     // FCM device tokens. The mobile app registers its token after sign-in and
     // removes it on sign-out so a signed-out device stops receiving pushes.

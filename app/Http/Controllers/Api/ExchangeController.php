@@ -4,8 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Exchange;
-use App\Models\MemberNotification;
 use App\Models\Resource;
+use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -176,16 +176,19 @@ class ExchangeController extends Controller
             $exchange->setRelation('resource', $wanted);
             $exchange->setRelation('offeredResource', $offered ?? null);
 
-            MemberNotification::create([
-                'user_id' => $wanted->user_id,
-                'type' => 'exchange_request',
-                'title' => 'New barter proposal',
-                'body' => $user->name.' offered '.$exchange->offeredLabel().' in exchange for “'.$wanted->title.'”.',
-                'data' => ['exchange_id' => $exchange->id, 'resource_id' => $wanted->id],
-            ]);
-
             return $exchange;
         });
+
+        // Notify after the transaction commits: a rollback must never leave the
+        // owner with a push for a proposal that was never stored.
+        app(NotificationService::class)->notify(
+            $wanted->user_id,
+            NotificationService::CATEGORY_EXCHANGES,
+            'exchange_request',
+            'New barter proposal',
+            $user->name.' offered '.$exchange->offeredLabel().' in exchange for “'.$wanted->title.'”.',
+            ['exchange_id' => $exchange->id, 'resource_id' => $wanted->id],
+        );
 
         return response()->json([
             'message' => 'Barter proposal sent.',
@@ -536,14 +539,15 @@ class ExchangeController extends Controller
             : $exchange->provider_id;
 
         try {
-            MemberNotification::create([
-                'user_id' => $recipientId,
-                'type' => 'exchange_update',
-                'title' => 'Barter '.strtolower($exchange->frontendStatus()),
-                'body' => $exchange->requestedLabel().' ↔ '.$exchange->offeredLabel()
+            app(NotificationService::class)->notify(
+                $recipientId,
+                NotificationService::CATEGORY_EXCHANGES,
+                'exchange_update',
+                'Barter '.strtolower($exchange->frontendStatus()),
+                $exchange->requestedLabel().' ↔ '.$exchange->offeredLabel()
                     .' is now '.$exchange->frontendStatus().'.',
-                'data' => ['exchange_id' => $exchange->id, 'status' => $status],
-            ]);
+                ['exchange_id' => $exchange->id, 'status' => $status],
+            );
         } catch (\Throwable $e) {
             // A notification failure must not roll back the status change.
             report($e);

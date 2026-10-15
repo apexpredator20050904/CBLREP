@@ -425,6 +425,7 @@ class AdminUserController extends Controller
         return [
             'id' => $u->id,
             'name' => $u->name,
+            'avatar_url' => $u->avatarUrl(),
             'email' => $u->email,
             'role' => $u->roleLabel(),
             'raw_role' => $u->role,

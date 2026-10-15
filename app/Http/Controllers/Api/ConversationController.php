@@ -8,7 +8,7 @@ use App\Models\MemberNotification;
 use App\Models\Message;
 use App\Models\Resource;
 use App\Models\User;
-use App\Services\PushService;
+use App\Services\NotificationService;
 use Illuminate\Http\Request;
 
 /**
@@ -298,21 +298,17 @@ class ConversationController extends Controller
             : ('Sent an attachment'.(isset($attachment['file_name']) ? ': '.$attachment['file_name'] : ''));
         $title = 'New message from '.$sender->name;
 
-        MemberNotification::create([
-            'user_id' => $recipientId,
-            'type' => 'message',
-            'title' => $title,
-            'body' => $preview,
-            'data' => [
+        app(NotificationService::class)->notify(
+            $recipientId,
+            NotificationService::CATEGORY_MESSAGES,
+            'message',
+            $title,
+            $preview,
+            [
                 'conversation_id' => $conversation->id,
                 'listing_id' => $conversation->listing_id,
             ],
-        ]);
-
-        app(PushService::class)->sendToUser($recipientId, $title, $preview, [
-            'type' => 'message',
-            'conversation_id' => (string) $conversation->id,
-        ]);
+        );
     }
 
     /**
@@ -341,10 +337,18 @@ class ConversationController extends Controller
     private function summary(Conversation $conversation, int $userId): array
     {
         $listing = $conversation->listing;
+        $other = $conversation->otherParticipant($userId);
 
         return [
             'id' => $conversation->id,
-            'member' => $conversation->otherParticipant($userId)?->only(['id', 'name', 'email']),
+            // Built explicitly rather than ->only([...]) so the avatarUrl()
+            // accessor (not a column) is included for the inbox avatar.
+            'member' => $other ? [
+                'id' => $other->id,
+                'name' => $other->name,
+                'email' => $other->email,
+                'avatar_url' => $other->avatarUrl(),
+            ] : null,
             'listing' => $listing ? [
                 'id' => $listing->id,
                 'title' => $listing->title,

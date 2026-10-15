@@ -11,6 +11,7 @@ use App\Models\Message;
 use App\Models\Resource;
 use App\Models\User;
 use App\Models\VerificationHistory;
+use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Storage;
@@ -88,6 +89,7 @@ class AdminPortalController extends Controller
             'id' => $u->id,
             'name' => $u->name,
             'fullName' => $u->name,
+            'avatar_url' => $u->avatarUrl(),
             'email' => $u->email,
             'role' => $u->isAdmin() ? 'System Administrator' : 'General Member',
             'raw_role' => $u->role,
@@ -189,10 +191,71 @@ class AdminPortalController extends Controller
             'note' => $details ?? $reason ?: null,
         ]);
 
+        // Tell the member. Before this, a verification decision — the one
+        // action a member is actively waiting on — produced no alert at all.
+        $this->notifyMemberOfAction($user, $action, $reason);
+
         return response()->json([
             'message' => 'User '.$action.' successful.',
             'user' => $user->fresh()->toFrontendArray(),
         ]);
+    }
+
+    /**
+     * Send the member an in-app alert (and push) for an account action.
+     *
+     * Unknown actions are silently skipped so this can never break the admin
+     * request over a wording change.
+     */
+    private function notifyMemberOfAction(User $user, string $action, string $reason): void
+    {
+        [$title, $body, $type] = match ($action) {
+            'verify' => [
+                'You are now a verified member',
+                'Your residency in Trinidad, Bohol has been verified. You can now post and trade with the community.'
+                    .($reason !== '' ? ' Note: '.$reason : ''),
+                'verification',
+            ],
+            'reject' => [
+                'Verification not approved',
+                $reason !== '' ? $reason : 'Your verification was not approved. You can re-submit with clearer details.',
+                'verification',
+            ],
+            'request-info' => [
+                'More information needed',
+                $reason !== '' ? $reason : 'Please update your verification details so review can continue.',
+                'verification',
+            ],
+            'suspend' => [
+                'Your account was suspended',
+                $reason !== '' ? $reason : 'Your account has been suspended by an administrator.',
+                'account',
+            ],
+            'reactivate' => [
+                'Your account was reactivated',
+                'Your account is active again. Welcome back.',
+                'account',
+            ],
+            default => [null, null, null],
+        };
+
+        if ($title === null) {
+            return;
+        }
+
+        try {
+            app(NotificationService::class)->notify(
+                $user->id,
+                NotificationService::CATEGORY_ACCOUNT,
+                $type,
+                $title,
+                (string) $body,
+                ['action' => $action],
+            );
+        } catch (\Throwable $e) {
+            // An alert failure must never fail the admin action.
+            report($e);
+        }
     }
 
     public function verification(Request $request)
@@ -213,6 +276,7 @@ class AdminPortalController extends Controller
             ->map(fn (User $u) => [
                 'id' => $u->id,
                 'fullName' => $u->name,
+                'avatar_url' => $u->avatarUrl(),
                 'email' => $u->email,
                 'barangay' => $u->barangay_or_location,
                 'is_student' => (bool) $u->student_status,
@@ -272,13 +336,20 @@ class AdminPortalController extends Controller
         $user = User::findOrFail($id);
         $path = (string) $user->verification_document_path;
 
-        abort_if(
-            $path === '' || ! Storage::disk('public')->exists($path),
-            404,
-            'No verification document on file.'
-        );
+        abort_if($path === '', 404, 'No verification document on file.');
 
-        return Storage::disk('public')->response($path);
+        // Documents are written to the PRIVATE disk: proof of residency carries
+        // an address / valid-ID image, so the file must never be reachable via
+        // a guessed /storage/… URL. The admin token on this route is the gate.
+        // Legacy rows written before the move still live on the public disk,
+        // so fall back to it and in-flight submissions stay reviewable.
+        foreach (['local', 'public'] as $disk) {
+            if (Storage::disk($disk)->exists($path)) {
+                return Storage::disk($disk)->response($path);
+            }
+        }
+
+        abort(404, 'No verification document on file.');
     }
 
     public function verificationHistory(Request $request, int $id)
@@ -464,10 +535,58 @@ class AdminPortalController extends Controller
             $resource->id,
         );
 
+        // Tell the owner their listing moved. A member whose post was hidden or
+        // removed previously had no way to know why it disappeared.
+        $this->notifyOwnerOfModeration($resource, $action, $reason);
+
         return response()->json([
             'message' => 'Listing '.$action.'d successfully.',
             'resource' => $this->resourceRow($resource),
         ]);
+    }
+
+    /** Alert a listing's owner when a moderator acts on it. */
+    private function notifyOwnerOfModeration(Resource $resource, string $action, string $reason): void
+    {
+        [$title, $body] = match ($action) {
+            'flag' => [
+                'Your listing was flagged',
+                '"'.$resource->title.'" was flagged for review'
+                    .($reason !== '' ? ': '.$reason : '.'),
+            ],
+            'hide' => [
+                'Your listing was hidden',
+                '"'.$resource->title.'" is hidden from the public feed'
+                    .($reason !== '' ? ': '.$reason : '.'),
+            ],
+            'remove' => [
+                'Your listing was removed',
+                '"'.$resource->title.'" was removed'
+                    .($reason !== '' ? ': '.$reason : '.'),
+            ],
+            'restore', 'approve' => [
+                'Your listing is live again',
+                '"'.$resource->title.'" is visible to the community again.',
+            ],
+            default => [null, null],
+        };
+
+        if ($title === null) {
+            return;
+        }
+
+        try {
+            app(NotificationService::class)->notify(
+                $resource->user_id,
+                NotificationService::CATEGORY_ACCOUNT,
+                'listing',
+                $title,
+                (string) $body,
+                ['resource_id' => $resource->id, 'status' => $resource->status],
+            );
+        } catch (\Throwable $e) {
+            report($e);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -575,15 +694,16 @@ class AdminPortalController extends Controller
         $listingTitle = $conversation->listing?->title;
         foreach ([$conversation->buyer_id, $conversation->seller_id] as $memberId) {
             if ($memberId) {
-                \App\Models\MemberNotification::create([
-                    'user_id' => $memberId,
-                    'type' => 'message',
-                    'title' => 'CBLREP admin replied',
-                    'body' => $listingTitle
+                app(NotificationService::class)->notify(
+                    (int) $memberId,
+                    NotificationService::CATEGORY_MESSAGES,
+                    'message',
+                    'CBLREP admin replied',
+                    $listingTitle
                         ? "Regarding \"{$listingTitle}\": {$message->body}"
                         : $message->body,
-                    'data' => ['conversation_id' => $conversation->id, 'listing_id' => $conversation->listing_id],
-                ]);
+                    ['conversation_id' => $conversation->id, 'listing_id' => $conversation->listing_id],
+                );
             }
         }
 

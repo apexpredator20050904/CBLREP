@@ -382,4 +382,139 @@ class ListingModerationTest extends TestCase
             'price' => null,
         ]);
     }
+
+    public function test_paid_listing_can_be_marked_negotiable(): void
+    {
+        $owner = $this->member();
+
+        $this->actingAs($owner)
+            ->postJson('/api/listings', [
+                'title' => 'A laptop for sale',
+                'type' => 'offer',
+                'barangay' => 'Poblacion',
+                'purok_sitio' => 'Purok 3',
+                'compensation_type' => 'paid',
+                'price' => 15000,
+                'price_negotiable' => true,
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.price_negotiable', true)
+            ->assertJsonPath('data.price', 15000);
+
+        $this->assertDatabaseHas('resources', [
+            'compensation_type' => 'paid',
+            'price_negotiable' => true,
+        ]);
+    }
+
+    public function test_negotiable_is_ignored_on_a_free_listing(): void
+    {
+        $owner = $this->member();
+
+        // There is no price to negotiate, so the flag is dropped rather than
+        // stored and later surfaced on a gift.
+        $this->actingAs($owner)
+            ->postJson('/api/listings', [
+                'title' => 'Free rice sacks',
+                'type' => 'offer',
+                'barangay' => 'Poblacion',
+                'purok_sitio' => 'Purok 3',
+                'compensation_type' => 'free',
+                'price_negotiable' => true,
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.price_negotiable', false);
+
+        $this->assertDatabaseHas('resources', [
+            'compensation_type' => 'free',
+            'price_negotiable' => false,
+        ]);
+    }
+
+    public function test_negotiable_is_cleared_when_a_sale_becomes_free(): void
+    {
+        $owner = $this->member();
+        $listing = Resource::create([
+            'user_id' => $owner->id,
+            'category_id' => Category::firstOrCreate(['name' => 'Tools'])->id,
+            'type' => 'offer',
+            'compensation_type' => 'paid',
+            'price' => 300,
+            'price_negotiable' => true,
+            'title' => 'A grinder',
+            'description' => 'Works.',
+            'condition' => 'Good',
+            'location' => 'Poblacion, Purok 3',
+            'barangay' => 'Poblacion',
+            'purok_sitio' => 'Purok 3',
+            'is_active' => true,
+            'status' => Resource::ACTIVE,
+        ]);
+
+        $this->actingAs($owner)
+            ->patchJson("/api/listings/{$listing->id}", ['compensation_type' => 'free'])
+            ->assertOk()
+            ->assertJsonPath('data.price_negotiable', false);
+
+        $this->assertSame(false, (bool) $listing->fresh()->price_negotiable);
+    }
+
+    public function test_poster_can_pin_an_exact_location(): void
+    {
+        $owner = $this->member();
+
+        $this->actingAs($owner)
+            ->postJson('/api/listings', [
+                'title' => 'A crate of mangoes',
+                'type' => 'offer',
+                'barangay' => 'Poblacion',
+                'purok_sitio' => 'Purok 3',
+                'compensation_type' => 'free',
+                'latitude' => 10.08123,
+                'longitude' => 124.34211,
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.latitude', 10.08123)
+            ->assertJsonPath('data.longitude', 124.34211);
+
+        $this->assertDatabaseHas('resources', [
+            'latitude' => 10.08123,
+            'longitude' => 124.34211,
+        ]);
+    }
+
+    public function test_coordinates_must_be_within_the_real_world_range(): void
+    {
+        $owner = $this->member();
+
+        $this->actingAs($owner)
+            ->postJson('/api/listings', [
+                'title' => 'A crate of mangoes',
+                'type' => 'offer',
+                'barangay' => 'Poblacion',
+                'purok_sitio' => 'Purok 3',
+                'compensation_type' => 'free',
+                'latitude' => 999,
+                'longitude' => 124.34211,
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('latitude');
+    }
+
+    public function test_owner_can_move_their_pin(): void
+    {
+        $owner = $this->member();
+        $listing = $this->listingFor($owner);
+
+        $this->actingAs($owner)
+            ->patchJson("/api/listings/{$listing->id}", [
+                'latitude' => 10.0999,
+                'longitude' => 124.3555,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.latitude', 10.0999)
+            ->assertJsonPath('data.longitude', 124.3555);
+
+        $this->assertSame(10.0999, (float) $listing->fresh()->latitude);
+    }
 }

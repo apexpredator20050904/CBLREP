@@ -13,6 +13,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rules\Password;
 use Throwable;
 
@@ -296,7 +297,12 @@ class AuthController extends Controller
         ]);
 
         $user = $request->user();
-        $path = $request->file('document')->store('verification-documents', 'public');
+        // Proof of residency (address / valid ID) is sensitive, so it goes on
+        // the PRIVATE disk. On the public disk it was directly reachable at a
+        // guessable /storage/verification-documents/… URL with no auth — the
+        // admin route was only the intended gate, not the actual one. Reads
+        // now happen only through AdminPortalController::verificationDocument().
+        $path = $request->file('document')->store('verification-documents', 'local');
         $user->update([
             'barangay_or_location' => $validated['barangay'],
             'barangay' => $validated['barangay'],
@@ -387,6 +393,61 @@ class AuthController extends Controller
 
         return response()->json([
             'message' => 'Profile updated successfully.',
+            'user' => $user->fresh()->toFrontendArray(),
+        ]);
+    }
+
+    /**
+     * POST /api/user/avatar — upload or replace the member's profile photo.
+     *
+     * A dedicated multipart endpoint rather than a field on the JSON
+     * PATCH /user: mixing a binary upload into a whitelist-merge handler makes
+     * both harder to reason about. The previous file is deleted on replace so
+     * avatars do not accumulate in storage.
+     */
+    public function updateAvatar(Request $request)
+    {
+        $request->validate([
+            // `image` guarantees a real raster image; `mimes` narrows it and
+            // deliberately excludes SVG, which can carry script payloads.
+            'avatar' => ['required', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+        ]);
+
+        $user = $request->user();
+        $previous = $user->avatar_path;
+
+        $user->avatar_path = $request->file('avatar')->store('avatars', 'public');
+        $user->save();
+
+        if (filled($previous) && $previous !== $user->avatar_path) {
+            Storage::disk('public')->delete($previous);
+        }
+
+        return response()->json([
+            'message' => 'Profile photo updated.',
+            'user' => $user->fresh()->toFrontendArray(),
+        ]);
+    }
+
+    /**
+     * DELETE /api/user/avatar — remove the profile photo.
+     *
+     * The member falls back to their initials avatar everywhere. Idempotent:
+     * removing a photo that was never set is a no-op success.
+     */
+    public function destroyAvatar(Request $request)
+    {
+        $user = $request->user();
+        $previous = $user->avatar_path;
+
+        if (filled($previous)) {
+            $user->avatar_path = null;
+            $user->save();
+            Storage::disk('public')->delete($previous);
+        }
+
+        return response()->json([
+            'message' => 'Profile photo removed.',
             'user' => $user->fresh()->toFrontendArray(),
         ]);
     }

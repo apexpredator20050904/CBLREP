@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\CanonicalizesPurokSitio;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
@@ -10,6 +11,8 @@ use Illuminate\Database\Eloquent\Model;
  */
 class Resource extends Model
 {
+    use CanonicalizesPurokSitio;
+
     /**
      * The three community-sharing modes a listing can declare.
      *
@@ -29,6 +32,24 @@ class Resource extends Model
         self::BARTER => 'BARTER',
         self::PAID => 'PAID',
     ];
+
+    // ------------------------------------------------------------------
+    // Progressive trust
+    // ------------------------------------------------------------------
+
+    /**
+     * How many listings an UNVERIFIED member may keep live at once.
+     *
+     * Residency verification lifts the cap entirely (see
+     * ListingController::store). The limit is intentionally soft to the rest
+     * of the portal: browsing, chat, the map and trade proposals stay open to
+     * everyone, so verification buys headroom rather than access.
+     *
+     * Only PUBLICLY VISIBLE rows count, so pausing, trading or archiving a
+     * listing frees a slot — and a moderator's hold (flagged/hidden/removed)
+     * never leaves a member permanently unable to post.
+     */
+    public const UNVERIFIED_ACTIVE_LIMIT = 3;
 
     // ------------------------------------------------------------------
     // Lifecycle vs moderation
@@ -84,6 +105,10 @@ class Resource extends Model
         'compensation_type',
         'wanted_item',
         'price',
+        // Only meaningful on a paid listing: whether the owner will consider a
+        // counter-offer. Normalised to false for free/barter (no price to
+        // negotiate) in ListingController.
+        'price_negotiable',
         'condition',
         'title',
         'description',
@@ -95,11 +120,21 @@ class Resource extends Model
         'is_active',
         'status',
         'image_path',
+        // Ordered gallery paths; image_path stays the cover (first) image.
+        'image_paths',
     ];
 
     protected $casts = [
         'is_active' => 'boolean',
         'price' => 'float',
+        'price_negotiable' => 'boolean',
+        // Ordered list of paths; the cover is image_path.
+        'image_paths' => 'array',
+        // Pinned coordinates are a decimal column; cast so the payload is
+        // always a number and matches the float barangay-anchor fallback in
+        // toFrontendListing().
+        'latitude' => 'float',
+        'longitude' => 'float',
     ];
 
     /** Canonical compensation key, defaulting legacy rows to barter. */
@@ -202,6 +237,17 @@ class Resource extends Model
             : null;
     }
 
+    /**
+     * Whether the owner will consider a counter-offer.
+     *
+     * Meaningful only for a paid listing — free/barter always report false so
+     * the UI never invites negotiation on something that carries no price.
+     */
+    public function displayNegotiable(): bool
+    {
+        return $this->compensationType() === self::PAID && (bool) $this->price_negotiable;
+    }
+
     // ------------------------------------------------------------------
     // Relations
     // ------------------------------------------------------------------
@@ -242,6 +288,8 @@ class Resource extends Model
                 ? $this->wanted_item
                 : null,
             'price' => $this->displayPrice(),
+            // True only for a paid listing whose owner welcomes an offer.
+            'price_negotiable' => $this->displayNegotiable(),
             'condition' => $this->condition ?? 'Good',
             'location' => $this->location ?? '',
             'barangay' => $this->barangay,
@@ -254,10 +302,60 @@ class Resource extends Model
             'owner' => [
                 'id' => $this->user?->id,
                 'name' => $this->user?->name ?? 'Member',
+                'avatar_url' => $this->user?->avatarUrl(),
+                // Surfaced so the feed can show a "Verified resident" badge and
+                // members can self-select whom they trade with.
+                'verified' => (bool) ($this->user?->is_verified ?? false),
             ],
             'user_id' => $this->user_id,
             'created_at' => (int) ($this->created_at?->getTimestamp() ?? time()) * 1000,
-            'image_url' => $this->image_path ? asset('storage/'.$this->image_path) : null,
+            // Cover image stays singular for the feed/thumbnail; the ordered
+            // gallery is the new array. Both derive from the same paths.
+            'image_url' => $this->coverImageUrl(),
+            'image_urls' => $this->imageUrls(),
         ];
+    }
+
+    /**
+     * The ordered gallery paths, normalised.
+     *
+     * `image_paths` is the source of truth once a listing has a gallery; a
+     * legacy row that only has `image_path` degrades to a single-element list so
+     * the feed keeps showing the one photo it always had.
+     *
+     * @return array<int, string>
+     */
+    public function imagePaths(): array
+    {
+        $paths = $this->image_paths;
+
+        if (is_string($paths)) {
+            $decoded = json_decode($paths, true);
+            $paths = is_array($decoded) ? $decoded : null;
+        }
+
+        $paths = is_array($paths)
+            ? array_values(array_filter($paths, fn ($p) => is_string($p) && $p !== ''))
+            : [];
+
+        if ($paths === [] && is_string($this->image_path) && $this->image_path !== '') {
+            $paths = [$this->image_path];
+        }
+
+        return $paths;
+    }
+
+    /** Public URLs for the whole gallery, in order. */
+    public function imageUrls(): array
+    {
+        return array_map(fn (string $path) => asset('storage/'.$path), $this->imagePaths());
+    }
+
+    /** Public URL of the cover (first) image, or null when there are none. */
+    public function coverImageUrl(): ?string
+    {
+        $paths = $this->imagePaths();
+
+        return $paths === [] ? null : asset('storage/'.$paths[0]);
     }
 }
