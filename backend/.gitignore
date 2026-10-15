@@ -1,0 +1,53 @@
+# Local environment — contains DB credentials. Never commit.
+/.env
+/.env.backup
+/.env.production
+
+# Composer / npm dependencies are reproducible from composer.lock.
+/vendor/
+/node_modules/
+
+# Runtime caches and generated state.
+/bootstrap/cache/*.php
+!/bootstrap/cache/.gitignore
+/storage/framework/cache/*
+!/storage/framework/cache/.gitignore
+/storage/framework/sessions/*
+!/storage/framework/sessions/.gitignore
+/storage/framework/views/*
+!/storage/framework/views/.gitignore
+# Test-uploaded attachments (Storage::fake disks live under testing/).
+/storage/framework/testing/
+/storage/logs/*
+!/storage/logs/.gitignore
+# Reports/state the API writes at runtime.
+/storage/app/*.json
+# Uploaded user content (listing photos, verification documents, chat
+# attachments) is stored on the `public` disk and served via public/storage.
+# It is user data, never source — keep it out of the repository.
+/storage/app/public/*
+!/storage/app/public/.gitignore
+/storage/app/private/*
+!/storage/app/private/.gitignore
+# Proof-of-residency documents now live on the `local` (private) disk, served
+# only through the authenticated admin route. Private user data — never commit.
+/storage/app/verification-documents/*
+!/storage/app/verification-documents/.gitignore
+# Firebase service-account key (server-side push credential) — never commit.
+/storage/app/firebase/*
+!/storage/app/firebase/.gitignore
+
+# Compiled admin console / Laravel Vite output. Rebuild from `frontend/` with
+# `npm run build`; never commit generated bundles.
+/public/admin/
+/public/build/
+# `php artisan storage:link` recreates this on the server. The previously
+# committed copy was a symlink to an absolute dev-machine path.
+/public/storage
+
+# Local SQLite database (the app runs on MySQL — see .env.example).
+/database/*.sqlite
+
+# Local tooling
+/.phpunit.result.cache
+/.php-cs-fixer.cache

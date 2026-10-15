@@ -1,0 +1,6 @@
+*
+!.gitignore
+
+# The Firebase service-account JSON lives here on the server
+# (FIREBASE_CREDENTIALS=storage/app/firebase/service-account.json).
+# It is a private key for the whole Firebase project — never commit it.

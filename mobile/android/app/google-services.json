@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "156401502934",
+    "project_id": "cblrep",
+    "storage_bucket": "cblrep.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:156401502934:android:501a245c74bb5290069777",
+        "android_client_info": {
+          "package_name": "ph.cblrep.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBIDoPM2cgdjXbalN7v7Vza-E3F2e2ScUk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
