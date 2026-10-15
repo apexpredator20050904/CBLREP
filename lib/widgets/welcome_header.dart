@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 import '../theme/cblrep_theme.dart';
+import 'user_avatar.dart';
 
 /// Branded welcome header — official logo + greeting + subtitle.
 class WelcomeHeader extends StatelessWidget {
   final String name;
   final String subtitle;
-  const WelcomeHeader({super.key, required this.name, required this.subtitle});
+
+  /// The signed-in member's own profile photo, when they have one. Falls back
+  /// to the initials chip below.
+  final String? avatarUrl;
+  const WelcomeHeader({super.key, required this.name, required this.subtitle, this.avatarUrl});
 
   String get initials {
     final parts = name.trim().split(RegExp(r'\s+'));
@@ -20,6 +25,7 @@ class WelcomeHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasPhoto = avatarUrl != null && avatarUrl!.isNotEmpty;
     return CblrepGradientHeader(
       child: Row(children: [
         const CblrepLogo(radius: 22),
@@ -32,12 +38,16 @@ class WelcomeHeader extends StatelessWidget {
             Text(subtitle, style: const TextStyle(color: Colors.white70, fontSize: 11)),
           ]),
         ),
-        Container(
-          width: 38, height: 38,
-          decoration: BoxDecoration(color: CblrepColors.actionOrange, borderRadius: BorderRadius.circular(12)),
-          alignment: Alignment.center,
-          child: Text(initials, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        ),
+        // The member's own photo when set; otherwise the branded initials chip.
+        if (hasPhoto)
+          UserAvatar(imageUrl: avatarUrl, name: name, radius: 19, borderColor: Colors.white24)
+        else
+          Container(
+            width: 38, height: 38,
+            decoration: BoxDecoration(color: CblrepColors.actionOrange, borderRadius: BorderRadius.circular(12)),
+            alignment: Alignment.center,
+            child: Text(initials, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
       ]),
     );
   }

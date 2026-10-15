@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import '../core/api_service.dart';
@@ -201,7 +202,7 @@ class AuthProvider extends ChangeNotifier {
     final payload = <String, dynamic>{
       if (name != null && name.trim().isNotEmpty) 'name': InputSanitizer.name(name),
       if (barangay != null && barangay.trim().isNotEmpty) 'barangay': InputSanitizer.name(barangay),
-      if (purokSitio != null && purokSitio.trim().isNotEmpty) 'purok_sitio': InputSanitizer.name(purokSitio),
+      if (purokSitio != null && purokSitio.trim().isNotEmpty) 'purok_sitio': InputSanitizer.clean(purokSitio),
     };
     if (payload.isEmpty) return;
 
@@ -211,6 +212,29 @@ class AuthProvider extends ChangeNotifier {
         ? UserModel.fromJson(Map<String, dynamic>.from(fresh))
         : UserModel.fromJson(await api.currentUser());
     notifyListeners();
+  }
+
+  /// POST /user/avatar — set or replace the member's profile photo, then
+  /// refresh the cached user so every avatar in the app updates at once.
+  Future<void> updateAvatar(File file) async {
+    final data = await api.uploadAvatar(file);
+    _applyUserPayload(data);
+    notifyListeners();
+  }
+
+  /// DELETE /user/avatar — remove the profile photo (falls back to initials).
+  Future<void> removeAvatar() async {
+    final data = await api.removeAvatar();
+    _applyUserPayload(data);
+    notifyListeners();
+  }
+
+  /// Replace the cached user from an endpoint's `user` payload.
+  void _applyUserPayload(Map<String, dynamic> data) {
+    final fresh = data['user'];
+    if (fresh is Map) {
+      user = UserModel.fromJson(Map<String, dynamic>.from(fresh));
+    }
   }
 
   /// PATCH /user with current_password — rotates the member's own password and

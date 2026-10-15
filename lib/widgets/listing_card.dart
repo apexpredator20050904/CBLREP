@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../theme/cblrep_theme.dart';
+import 'user_avatar.dart';
+import 'verified_badge.dart';
 
 /// Reusable resource card for the home feed, profile and map previews.
 ///
@@ -176,22 +178,36 @@ class ListingCard extends StatelessWidget {
                     dark: dark,
                   ),
                   const SizedBox(height: 6),
-                  // Author on its own line, sharing a row with a person icon.
+                  // Author on its own line: a small photo (or initials) plus
+                  // the name, with a verified tick when the owner's residency
+                  // is confirmed.
                   Row(
                     children: [
-                      Icon(Icons.person_outline, size: 12, color: muted),
-                      const SizedBox(width: 4),
+                      UserAvatar(
+                        imageUrl: listing.ownerAvatarUrl,
+                        name: listing.owner,
+                        radius: 9,
+                      ),
+                      const SizedBox(width: 6),
                       Expanded(
-                        child: Text(
-                          listing.owner,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            color: muted,
+                        child: Row(children: [
+                          Flexible(
+                            child: Text(
+                              listing.owner,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: muted,
+                              ),
+                            ),
                           ),
-                        ),
+                          if (listing.ownerVerified) ...[
+                            const SizedBox(width: 3),
+                            const VerifiedBadge(compact: true),
+                          ],
+                        ]),
                       ),
                     ],
                   ),

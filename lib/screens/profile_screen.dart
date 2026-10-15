@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart' hide Feedback;
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../core/api_service.dart';
 import '../config/community.dart';
@@ -10,6 +13,9 @@ import '../providers/listings_provider.dart';
 import '../providers/live_hub_provider.dart';
 import '../theme/cblrep_theme.dart';
 import '../widgets/welcome_header.dart';
+import '../widgets/user_avatar.dart';
+import '../widgets/verified_badge.dart';
+import '../widgets/post_limit_dialog.dart';
 import 'login_screen.dart';
 import 'listing_detail_screen.dart';
 import 'settings_screen.dart';
@@ -77,16 +83,93 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
     );
     final newName = InputSanitizer.name(name.text);
+    final newPurok = purok.text.trim();
     name.dispose();
     purok.dispose();
     if (ok != true || !mounted) return;
 
+    if (newPurok.isNotEmpty && !isValidPurokSitio(newPurok)) {
+      Feedback.error(context, 'Enter a purok or sitio like "Purok 3" or "Sitio Name".', onRetry: _editProfile);
+      return;
+    }
+
     setState(() => saving = true);
     try {
-      await context.read<AuthProvider>().updateProfile(name: newName, barangay: barangay, purokSitio: purok.text.trim());
+      await context.read<AuthProvider>().updateProfile(name: newName, barangay: barangay, purokSitio: newPurok);
       if (mounted) Feedback.success(context, 'Profile updated successfully.');
     } on ApiException catch (e) {
       if (mounted) Feedback.error(context, e.message, onRetry: _editProfile);
+    } finally {
+      if (mounted) setState(() => saving = false);
+    }
+  }
+
+  /// Set or replace the member's profile photo, or remove the existing one.
+  ///
+  /// The picked image is downscaled on-device (max 1024px, quality 85) so a
+  /// modern phone camera does not upload a multi-megabyte file for a thumbnail.
+  Future<void> _changeAvatar() async {
+    final auth = context.read<AuthProvider>();
+    final hasPhoto = auth.user?.avatarUrl?.isNotEmpty ?? false;
+
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Profile photo', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.photo_camera_outlined),
+            title: const Text('Take a photo'),
+            onTap: () => Navigator.pop(c, 'camera'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.photo_library_outlined),
+            title: const Text('Choose from gallery'),
+            onTap: () => Navigator.pop(c, 'gallery'),
+          ),
+          if (hasPhoto)
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: CblrepColors.dangerRed),
+              title: const Text('Remove photo', style: TextStyle(color: CblrepColors.dangerRed)),
+              onTap: () => Navigator.pop(c, 'remove'),
+            ),
+          const SizedBox(height: 6),
+        ]),
+      ),
+    );
+    if (choice == null || !mounted) return;
+
+    if (choice == 'remove') {
+      await _runAvatarAction(auth.removeAvatar, 'Profile photo removed.');
+      return;
+    }
+
+    final picked = await ImagePicker().pickImage(
+      source: choice == 'camera' ? ImageSource.camera : ImageSource.gallery,
+      maxWidth: 1024,
+      maxHeight: 1024,
+      imageQuality: 85,
+    );
+    if (picked == null || !mounted) return;
+
+    await _runAvatarAction(() => auth.updateAvatar(File(picked.path)), 'Profile photo updated.');
+  }
+
+  /// Runs an avatar write with the shared busy flag + feedback, so a failure
+  /// surfaces the server's message instead of silently doing nothing.
+  Future<void> _runAvatarAction(Future<void> Function() action, String successMessage) async {
+    setState(() => saving = true);
+    try {
+      await action();
+      if (mounted) Feedback.success(context, successMessage);
+    } on ApiException catch (e) {
+      if (mounted) Feedback.error(context, e.message, onRetry: _changeAvatar);
     } finally {
       if (mounted) setState(() => saving = false);
     }
@@ -163,7 +246,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await context.read<ListingsProvider>().setMyListingStatus(listing.id, status);
       if (mounted) Feedback.success(context, 'Listing ${_actionDone(status)}.');
     } on ApiException catch (e) {
-      if (mounted) Feedback.error(context, e.message);
+      if (!mounted) return;
+      // Bringing an archived/paused listing back to active is subject to the
+      // unverified posting cap, so route it to the same "get verified" path a
+      // rejected new post would take.
+      if (e.statusCode == 403) {
+        await showUnverifiedPostLimitDialog(context, e.message);
+      } else {
+        Feedback.error(context, e.message);
+      }
     }
   }
 
@@ -176,9 +267,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Text('Pause (unavailable)'),
           )
         else
-          const PopupMenuItem(
+          PopupMenuItem(
             value: 'active',
-            child: Text('Resume (show in feed)'),
+            // A paused listing is "Resumed"; one filed away in the archive or
+            // completed as a trade is "Reposted" — the same one-tap restore,
+            // named for what the member is actually doing.
+            child: Text(l.isArchived || l.isTraded
+                ? 'Repost (show in feed)'
+                : 'Resume (show in feed)'),
           ),
         if (!l.isTraded)
           const PopupMenuItem(value: 'traded', child: Text('Mark as traded')),
@@ -328,7 +424,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         : all.where((l) => l.status == _myFilter).toList();
     final dark = Theme.of(context).brightness == Brightness.dark;
     return ListView(padding: const EdgeInsets.all(16), children: [
-      WelcomeHeader(name: user?.name ?? 'member', subtitle: user?.email ?? ''),
+      WelcomeHeader(name: user?.name ?? 'member', subtitle: user?.email ?? '', avatarUrl: user?.avatarUrl),
       const SizedBox(height: 12),
       Container(
         padding: const EdgeInsets.all(12),
@@ -336,8 +432,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: Column(children: [
           ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: const CblrepLogo(radius: 18),
-            title: Text(user?.name ?? 'Member', style: TextStyle(fontWeight: FontWeight.bold, color: dark ? Colors.white : Colors.black)),
+            // The member's own photo — tap to change. The camera badge makes
+            // the affordance obvious; without it the circle reads as static.
+            leading: GestureDetector(
+              onTap: saving ? null : _changeAvatar,
+              child: Stack(clipBehavior: Clip.none, children: [
+                UserAvatar(
+                  imageUrl: user?.avatarUrl,
+                  name: user?.name ?? 'Member',
+                  radius: 22,
+                ),
+                Positioned(
+                  right: -4,
+                  bottom: -4,
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: const BoxDecoration(
+                      color: CblrepColors.actionOrange,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.photo_camera, size: 11, color: Colors.white),
+                  ),
+                ),
+              ]),
+            ),
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(user?.name ?? 'Member', style: TextStyle(fontWeight: FontWeight.bold, color: dark ? Colors.white : Colors.black)),
+                // The verified resident mark sits right under the name, where
+                // the member sees the payoff of their submission.
+                if (user?.verificationStatus == 'Verified') ...[
+                  const SizedBox(height: 4),
+                  const VerifiedBadge(),
+                ],
+              ],
+            ),
             subtitle: Text([user?.barangay ?? '', user?.purokSitio ?? ''].where((p) => p.isNotEmpty).join(' · '), style: TextStyle(fontSize: 11, color: dark ? Colors.white70 : Colors.black54)),
             trailing: IconButton(tooltip: 'Edit profile', icon: const Icon(Icons.edit_outlined, size: 20), onPressed: _editProfile),
           ),
@@ -373,6 +504,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       const SizedBox(height: 12),
       Text('My listings (${counts['all'] ?? all.length})', style: TextStyle(color: dark ? Colors.white : Colors.black87, fontWeight: FontWeight.bold, fontSize: 13)),
+      // Progressive trust, shown where it bites: an unverified member managing
+      // their listings sees how many active slots remain before they must
+      // verify (or free one up by pausing/archiving).
+      if (user?.verified == false && listingsProvider.activePostLimit != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Row(children: [
+            Icon(Icons.info_outline, size: 14, color: dark ? Colors.white54 : Colors.black45),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                '${listingsProvider.activePostCount} of ${listingsProvider.activePostLimit} active listings used'
+                ' — verify to post without a limit.',
+                style: TextStyle(fontSize: 11, color: dark ? Colors.white54 : Colors.black45),
+              ),
+            ),
+          ]),
+        ),
       const SizedBox(height: 8),
       // Filter tabs. The counts come from the API so an empty tab is obvious
       // before it is opened.

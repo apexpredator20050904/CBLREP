@@ -38,6 +38,23 @@ String? _resolveImageUrl(String? raw) {
   return raw;
 }
 
+/// Resolves a listing's ordered gallery from `image_urls`, falling back to the
+/// single `image_url` so an older payload still yields its one photo.
+List<String> _imageList(dynamic rawList, dynamic rawCover) {
+  final resolved = <String>[];
+  if (rawList is List) {
+    for (final entry in rawList) {
+      final url = _resolveImageUrl(entry is String ? entry : null);
+      if (url != null) resolved.add(url);
+    }
+  }
+  if (resolved.isEmpty) {
+    final cover = _resolveImageUrl(rawCover is String ? rawCover : null);
+    if (cover != null) resolved.add(cover);
+  }
+  return resolved;
+}
+
 class UserModel {
   final int id;
   final String name;
@@ -48,6 +65,11 @@ class UserModel {
   final String verificationStatus;
   final String? verificationNote;
 
+  /// Absolute URL of the member's profile photo, or null when they have none
+  /// (the UI then falls back to their initials). Already host-rewritten by
+  /// [_resolveImageUrl] so it loads regardless of which API base won.
+  final String? avatarUrl;
+
   const UserModel({
     required this.id,
     required this.name,
@@ -57,6 +79,7 @@ class UserModel {
     required this.verified,
     required this.verificationStatus,
     this.verificationNote,
+    this.avatarUrl,
   });
 
   /// Normalises any server value — the raw `unverified`/`pending`/`verified`/
@@ -83,6 +106,7 @@ class UserModel {
         verified: json['is_verified'] == true,
         verificationStatus: labelForStatus(json['verification_status']),
         verificationNote: json['verification_note'] as String?,
+        avatarUrl: _resolveImageUrl(json['avatar_url'] as String?),
       );
 
   UserModel copyWith({
@@ -99,6 +123,9 @@ class UserModel {
         verified: verified ?? this.verified,
         verificationStatus: verificationStatus ?? this.verificationStatus,
         verificationNote: verificationNote ?? this.verificationNote,
+        // Carried through explicitly: refreshVerification() rebuilds the model
+        // and would otherwise drop the photo on every status poll.
+        avatarUrl: avatarUrl,
       );
 }
 
@@ -114,6 +141,12 @@ class ListingModel {
   /// and paid listings, which have no return side.
   final String? wantedItem;
   final double? price;
+
+  /// Paid-only: the owner welcomes a counter-offer, so the app shows
+  /// "Negotiable" and a "Make an offer" action. Always false for free/barter
+  /// (the server normalises it), so the UI never invites a price negotiation
+  /// on something that has none.
+  final bool priceNegotiable;
   final String category;
   final String condition;
   final String location;
@@ -121,7 +154,17 @@ class ListingModel {
   final String purokSitio;
   final String owner;
   final int ownerId;
+
+  /// Owner's profile photo URL (null when they have none) and residency
+  /// verification flag — both surfaced from `owner{}` so a card can show a
+  /// photo + "Verified resident" badge.
+  final String? ownerAvatarUrl;
+  final bool ownerVerified;
   final String? imageUrl;
+
+  /// The full ordered gallery. Empty when the listing has no photos. The first
+  /// entry is the cover and equals [imageUrl].
+  final List<String> imageUrls;
   final bool active;
 
   /// Canonical lifecycle status: active | paused | traded | archived, or an
@@ -140,6 +183,7 @@ class ListingModel {
     this.compensationLabel = 'BARTER',
     this.wantedItem,
     this.price,
+    this.priceNegotiable = false,
     required this.category,
     required this.condition,
     required this.location,
@@ -147,7 +191,10 @@ class ListingModel {
     required this.purokSitio,
     required this.owner,
     required this.ownerId,
+    this.ownerAvatarUrl,
+    this.ownerVerified = false,
     this.imageUrl,
+    this.imageUrls = const [],
     required this.active,
     this.status = 'active',
     this.latitude,
@@ -157,6 +204,10 @@ class ListingModel {
   bool get isFree => compensationType == 'free';
   bool get isPaid => compensationType == 'paid';
   bool get isBarter => !isFree && !isPaid;
+
+  /// True when a buyer should be offered the "Make an offer" route: a priced
+  /// sale whose owner welcomes a counter-offer.
+  bool get isNegotiable => isPaid && priceNegotiable;
 
   // ── Lifecycle status ─────────────────────────────────────────────────
   bool get isActiveStatus => status == 'active';
@@ -199,6 +250,10 @@ class ListingModel {
           'BARTER',
       wantedItem: (json['wanted_item'] as String?)?.trim(),
       price: _asDouble(json['price']),
+      // Only a paid listing can be negotiable; the server already normalises
+      // this, but guard the flag here so a stale/foreign payload cannot make a
+      // gift or a trade look open to offers.
+      priceNegotiable: json['price_negotiable'] == true && compensation == 'paid',
       category: (json['category'] ?? 'Tools') as String,
       condition: (json['condition'] ?? 'Good') as String,
       location: (json['location'] ?? '') as String,
@@ -208,7 +263,12 @@ class ListingModel {
       ownerId: owner is Map
           ? (owner['id'] as num?)?.toInt() ?? (json['user_id'] as num?)?.toInt() ?? 0
           : (json['user_id'] as num?)?.toInt() ?? 0,
+      ownerAvatarUrl: owner is Map ? _resolveImageUrl(owner['avatar_url'] as String?) : null,
+      ownerVerified: owner is Map && owner['verified'] == true,
       imageUrl: _resolveImageUrl(json['image_url'] as String?),
+      // The ordered gallery. Falls back to the single cover so an older API
+      // payload still renders its one photo.
+      imageUrls: _imageList(json['image_urls'], json['image_url']),
       active: json['is_active'] != false,
       status: _listingStatus(json['status']),
       latitude: _asDouble(json['latitude']),
@@ -264,6 +324,9 @@ class ConversationModel {
   final int id;
   final String memberName;
   final String memberEmail;
+
+  /// The other participant's profile photo, or null (initials fallback).
+  final String? memberAvatarUrl;
   final int unreadCount;
   final DateTime? lastMessageAt;
 
@@ -277,6 +340,7 @@ class ConversationModel {
     required this.id,
     required this.memberName,
     required this.memberEmail,
+    this.memberAvatarUrl,
     required this.unreadCount,
     this.lastMessageAt,
     this.listingTitle,
@@ -295,6 +359,7 @@ class ConversationModel {
       id: (json['id'] as num?)?.toInt() ?? 0,
       memberName: '${member['name'] ?? 'Member'}',
       memberEmail: '${member['email'] ?? ''}',
+      memberAvatarUrl: _resolveImageUrl(member['avatar_url'] as String?),
       unreadCount: (json['unread_count'] as num?)?.toInt() ?? 0,
       lastMessageAt: DateTime.tryParse('${json['last_message_at'] ?? ''}'),
       listingTitle: listing == null ? null : '${listing['title'] ?? ''}',
