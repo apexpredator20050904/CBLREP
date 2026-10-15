@@ -832,6 +832,9 @@ class ApiService {
       '/conversations/$id/messages',
       data: form,
       onSendProgress: onProgress,
+      // Photos and (especially) video clips can be many MB; the global 15s
+      // send timeout would abort a slow mobile upload, so widen it for files.
+      options: Options(sendTimeout: const Duration(minutes: 5)),
     )) as Map);
   }
 
@@ -853,6 +856,7 @@ class ApiService {
       '/messages',
       data: form,
       onSendProgress: onProgress,
+      options: Options(sendTimeout: const Duration(minutes: 5)),
     )) as Map);
     return Map<String, dynamic>.from(data['message'] as Map);
   }

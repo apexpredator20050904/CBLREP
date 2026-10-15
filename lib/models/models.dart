@@ -420,11 +420,22 @@ class ChatMessageModel {
   /// and never treats a local document staging path as an image.
   bool get isImage {
     if (fileType == 'image') return true;
-    if (fileType == 'document') return false;
+    if (fileType == 'document' || fileType == 'video') return false;
     if (!hasAttachment) return false;
     // Optimistic rows store `fileName` without a type until reconciled —
     // trust the name first (set from the picked file on both platforms).
     return _looksLikeImage();
+  }
+
+  /// True for video attachments, rendered with an inline player.
+  ///
+  /// Like [isImage], an optimistic row has no server `fileType` yet, so the
+  /// name/mime is sniffed until the poll reconciles it.
+  bool get isVideo {
+    if (fileType == 'video') return true;
+    if (fileType == 'image' || fileType == 'document') return false;
+    if (!hasAttachment) return false;
+    return _looksLikeVideo();
   }
 
   bool _looksLikeImage() {
@@ -435,6 +446,17 @@ class ChatMessageModel {
         name.endsWith('.jpeg') ||
         name.endsWith('.png') ||
         name.endsWith('.webp');
+  }
+
+  bool _looksLikeVideo() {
+    final name = (fileName ?? '').toLowerCase();
+    final mime = (mimeType ?? '').toLowerCase();
+    return mime.startsWith('video/') ||
+        name.endsWith('.mp4') ||
+        name.endsWith('.mov') ||
+        name.endsWith('.m4v') ||
+        name.endsWith('.webm') ||
+        name.endsWith('.3gp');
   }
 
   /// Human-readable file size for the document card subtitle.

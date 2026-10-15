@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:video_player/video_player.dart';
 import '../core/api_service.dart';
 import '../core/feedback.dart';
 import '../models/models.dart';
@@ -13,18 +14,22 @@ import '../providers/auth_provider.dart';
 import '../providers/chat_provider.dart';
 import '../theme/cblrep_theme.dart';
 
+/// How a staged (pre-send) attachment renders in the composer preview bar.
+enum _StagedKind { image, document, video }
+
 /// Secure 1:1 chat thread with 3s live polling, optimistic sending,
-/// Messenger-style message actions and photo/document attachments.
+/// Messenger-style message actions and photo/document/video attachments.
 ///
 /// Long-pressing a bubble opens an action sheet:
 ///   Copy   — always available (message text, or the file link for attachments)
 ///   Edit   — your own text messages only
 ///   Delete — your own messages only
 ///
-/// The (+) button beside the composer opens Gallery / Camera / Document
-/// picking with a pre-send preview bar (X to remove). Images render inline
-/// with rounded corners + tap-to-expand; documents render as file cards with
-/// a tap-to-open action.
+/// The (+) button beside the composer opens Gallery / Camera / Video /
+/// Document picking with a pre-send preview bar (X to remove). Images render
+/// inline with rounded corners + tap-to-expand; video renders as a play card
+/// that expands into an inline player; documents render as file cards with a
+/// tap-to-open action.
 class ChatScreen extends StatefulWidget {
   final int conversationId;
   final String title;
@@ -61,8 +66,8 @@ class _ChatScreenState extends State<ChatScreen> {
   /// File staged via the (+) picker, shown in the preview bar until sent.
   File? _stagedFile;
 
-  /// True when [_stagedFile] is a photo (inline thumb) vs a document (file card).
-  bool _stagedIsImage = false;
+  /// How the staged file renders in the preview bar: photo, document or video.
+  _StagedKind _stagedKind = _StagedKind.document;
 
   /// Name shown in the preview bar for the staged file.
   String _stagedName = '';
@@ -204,7 +209,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _draftBeforeEdit = input.text;
     // Editing never carries an attachment — drop any staged file first.
     _stagedFile = null;
-    _stagedIsImage = false;
+    _stagedKind = _StagedKind.document;
     _stagedName = '';
     setState(() {
       _editingId = message.id;
@@ -282,6 +287,20 @@ class _ChatScreenState extends State<ChatScreen> {
               onTap: () => Navigator.pop(sheetContext, 'camera'),
             ),
             ListTile(
+              leading: const Icon(Icons.video_library_outlined),
+              title: const Text('Video',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text('MP4 or MOV up to 50 MB, max 1 min'),
+              onTap: () => Navigator.pop(sheetContext, 'video'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam_outlined),
+              title: const Text('Record Video',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text('Film a clip up to 1 minute'),
+              onTap: () => Navigator.pop(sheetContext, 'video_camera'),
+            ),
+            ListTile(
               leading: const Icon(Icons.description_outlined),
               title: const Text('Document File',
                   style: TextStyle(fontWeight: FontWeight.w600)),
@@ -311,8 +330,33 @@ class _ChatScreenState extends State<ChatScreen> {
         }
         setState(() {
           _stagedFile = file;
-          _stagedIsImage = false;
+          _stagedKind = _StagedKind.document;
           _stagedName = result?.files.single.name ?? path.split('/').last;
+        });
+        composerFocus.requestFocus();
+      } else if (choice == 'video' || choice == 'video_camera') {
+        // `maxDuration` bounds a *recorded* clip; a gallery pick ignores it,
+        // so the 50 MB size guard below is the real backstop.
+        final picked = await _picker.pickVideo(
+          source: choice == 'video_camera'
+              ? ImageSource.camera
+              : ImageSource.gallery,
+          maxDuration: const Duration(minutes: 1),
+        );
+        if (picked == null || !mounted) return;
+        final file = File(picked.path);
+        if (await file.length() > 50 * 1024 * 1024) {
+          if (mounted) {
+            Feedback.error(context, 'Video must be 50 MB or less.');
+          }
+          return;
+        }
+        setState(() {
+          _stagedFile = file;
+          _stagedKind = _StagedKind.video;
+          _stagedName = picked.name.isNotEmpty
+              ? picked.name
+              : picked.path.split('/').last;
         });
         composerFocus.requestFocus();
       } else {
@@ -328,7 +372,7 @@ class _ChatScreenState extends State<ChatScreen> {
         }
         setState(() {
           _stagedFile = file;
-          _stagedIsImage = true;
+          _stagedKind = _StagedKind.image;
           _stagedName = picked.name.isNotEmpty
               ? picked.name
               : picked.path.split('/').last;
@@ -347,7 +391,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void _removeStaged() {
     setState(() {
       _stagedFile = null;
-      _stagedIsImage = false;
+      _stagedKind = _StagedKind.document;
       _stagedName = '';
     });
   }
@@ -468,7 +512,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 if (_hasStaged)
                   _AttachmentPreview(
                     file: _stagedFile!,
-                    isImage: _stagedIsImage,
+                    kind: _stagedKind,
                     name: _stagedName,
                     onRemove: sending ? null : _removeStaged,
                   ),
@@ -523,16 +567,27 @@ class _ChatScreenState extends State<ChatScreen> {
 /// Pre-send attachment preview bar with an "X" remove button.
 class _AttachmentPreview extends StatelessWidget {
   final File file;
-  final bool isImage;
+  final _StagedKind kind;
   final String name;
   final VoidCallback? onRemove;
 
   const _AttachmentPreview({
     required this.file,
-    required this.isImage,
+    required this.kind,
     required this.name,
     required this.onRemove,
   });
+
+  String get _label {
+    switch (kind) {
+      case _StagedKind.image:
+        return 'Photo ready to send';
+      case _StagedKind.video:
+        return 'Video ready to send';
+      case _StagedKind.document:
+        return 'Document ready to send';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -547,14 +602,18 @@ class _AttachmentPreview extends StatelessWidget {
       child: Row(children: [
         ClipRRect(
           borderRadius: BorderRadius.circular(8),
-          child: isImage
+          child: kind == _StagedKind.image
               ? Image.file(file, width: 52, height: 52, fit: BoxFit.cover)
               : Container(
                   width: 52,
                   height: 52,
                   color: CblrepColors.compPaid.withValues(alpha: 0.15),
-                  child: const Icon(Icons.description_outlined,
-                      color: CblrepColors.compPaid),
+                  child: Icon(
+                    kind == _StagedKind.video
+                        ? Icons.play_circle_outline
+                        : Icons.description_outlined,
+                    color: CblrepColors.compPaid,
+                  ),
                 ),
         ),
         const SizedBox(width: 10),
@@ -569,7 +628,7 @@ class _AttachmentPreview extends StatelessWidget {
                   style: const TextStyle(
                       fontSize: 12, fontWeight: FontWeight.w700)),
               Text(
-                isImage ? 'Photo ready to send' : 'Document ready to send',
+                _label,
                 style: const TextStyle(fontSize: 11, color: Colors.black54),
               ),
             ],
@@ -638,7 +697,9 @@ class _Bubble extends StatelessWidget {
                 Text(message.sender, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: muted)),
               if (message.hasAttachment && message.isImage)
                 _ImageAttachment(message: message, mine: mine),
-              if (message.hasAttachment && !message.isImage)
+              if (message.hasAttachment && message.isVideo)
+                _VideoAttachment(message: message),
+              if (message.hasAttachment && !message.isImage && !message.isVideo)
                 _DocumentAttachment(message: message, mine: mine),
               if (message.body.isNotEmpty)
                 Padding(
@@ -761,6 +822,201 @@ class _ImageAttachment extends StatelessWidget {
           ),
         ]),
       ),
+    );
+  }
+}
+
+/// Video attachment: a dark card with a play badge that becomes an inline
+/// player on tap. The controller is created lazily (never while scrolling)
+/// and disposed with the bubble, so a long thread does not hold decoders.
+class _VideoAttachment extends StatefulWidget {
+  final ChatMessageModel message;
+
+  const _VideoAttachment({required this.message});
+
+  @override
+  State<_VideoAttachment> createState() => _VideoAttachmentState();
+}
+
+class _VideoAttachmentState extends State<_VideoAttachment> {
+  VideoPlayerController? _controller;
+  bool _initializing = false;
+  bool _failed = false;
+  bool _playing = false;
+
+  @override
+  void dispose() {
+    _controller?.removeListener(_onTick);
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  /// A local staging path (an optimistic bubble) vs the server's absolute URL.
+  ///
+  /// Mirrors `_ImageAttachment`: the server always returns an absolute
+  /// `file_url`, so a leading `/` means an optimistic row's on-device file.
+  /// `/storage/...` is excluded in case a config ever returns it relative.
+  bool get _isLocal {
+    final raw = widget.message.fileUrl ?? '';
+    return raw.startsWith('/') &&
+        !raw.startsWith('//') &&
+        !raw.startsWith('/storage');
+  }
+
+  void _onTick() {
+    final playing = _controller?.value.isPlaying ?? false;
+    if (playing != _playing && mounted) setState(() => _playing = playing);
+  }
+
+  Future<void> _start() async {
+    if (_initializing || _controller != null) return;
+    final raw = widget.message.fileUrl ?? '';
+    final url = widget.message.resolvedFileUrl;
+    if (!_isLocal && (url == null || url.isEmpty)) {
+      setState(() => _failed = true);
+      return;
+    }
+    setState(() => _initializing = true);
+    final controller = _isLocal
+        ? VideoPlayerController.file(File(raw))
+        : VideoPlayerController.networkUrl(Uri.parse(url!));
+    try {
+      await controller.initialize();
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+      controller.addListener(_onTick);
+      setState(() {
+        _controller = controller;
+        _initializing = false;
+      });
+      await controller.play();
+    } catch (_) {
+      await controller.dispose();
+      if (!mounted) return;
+      setState(() {
+        _initializing = false;
+        _failed = true;
+      });
+      Feedback.error(context, 'Could not play this video.');
+    }
+  }
+
+  Future<void> _togglePlay() async {
+    final controller = _controller;
+    if (controller == null) return;
+    if (controller.value.isPlaying) {
+      await controller.pause();
+    } else {
+      await controller.play();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = _controller;
+    if (controller != null && controller.value.isInitialized) {
+      final ratio =
+          controller.value.aspectRatio > 0 ? controller.value.aspectRatio : 16 / 9;
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 240, maxHeight: 320),
+          child: AspectRatio(
+            aspectRatio: ratio,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                VideoPlayer(controller),
+                // Tap anywhere toggles playback; the badge marks a paused clip.
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _togglePlay,
+                    child: _playing
+                        ? const SizedBox.shrink()
+                        : const Center(child: _PlayBadge()),
+                  ),
+                ),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: VideoProgressIndicator(
+                    controller,
+                    allowScrubbing: true,
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Not started yet: a tappable poster card with a play badge. The card is
+    // always dark so the white glyph/label stay legible on both the light
+    // incoming bubble and the green outgoing one.
+    return GestureDetector(
+      onTap: _failed ? null : _start,
+      child: Container(
+        width: 220,
+        height: 150,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: Colors.black87,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: _initializing
+            ? const CircularProgressIndicator(color: Colors.white)
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _failed ? Icons.error_outline : Icons.play_circle_fill,
+                    size: 46,
+                    color: Colors.white,
+                  ),
+                  const SizedBox(height: 6),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text(
+                      _failed
+                          ? 'Video unavailable'
+                          : (widget.message.fileName ?? 'Video'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 11, color: Colors.white70),
+                    ),
+                  ),
+                  if (!_failed && widget.message.displayFileSize.isNotEmpty)
+                    Text(
+                      widget.message.displayFileSize,
+                      style: const TextStyle(fontSize: 10, color: Colors.white54),
+                    ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+/// Play glyph shown over a paused / not-yet-started video.
+class _PlayBadge extends StatelessWidget {
+  const _PlayBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(6),
+      decoration: const BoxDecoration(
+        color: Colors.black45,
+        shape: BoxShape.circle,
+      ),
+      child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 34),
     );
   }
 }
