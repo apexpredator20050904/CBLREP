@@ -181,5 +181,71 @@ void main() {
       expect(m.isImage, isFalse);
       expect(m.isPending, isTrue);
     });
+
+    test('a server video message is flagged as video, not image or document', () {
+      final m = ChatMessageModel.fromJson({
+        'id': 60,
+        'body': 'Quick look at the item',
+        'sender_id': 7,
+        'sender': {'id': 7, 'name': 'Ana'},
+        'file_url': 'http://example.test/storage/chat_attachments/clip.mp4',
+        'file_type': 'video',
+        'file_name': 'clip.mp4',
+        'file_size': 5242880,
+        'mime_type': 'video/mp4',
+      });
+
+      expect(m.hasAttachment, isTrue);
+      expect(m.isVideo, isTrue);
+      expect(m.isImage, isFalse);
+      expect(m.displayFileSize, '5.0 MB');
+    });
+
+    test('an optimistic video row sniffs the type from its name', () {
+      // Local staging path with a .mov name and no reliable server mime.
+      final m = ChatMessageModel.fromJson({
+        'id': 'local-1730000000001',
+        'body': '',
+        'sender_id': 7,
+        'sender': 'You',
+        'file_name': 'walkaround.mov',
+        'file_url': '/data/user/0/ph.cblrep.app/cache/walkaround.mov',
+      });
+
+      expect(m.isVideo, isTrue);
+      expect(m.isImage, isFalse);
+      expect(m.isPending, isTrue);
+    });
+
+    test('the video sniff honours the mime when the name is unhelpful', () {
+      final m = ChatMessageModel.fromJson({
+        'id': 'local-1730000000002',
+        'body': '',
+        'sender_id': 7,
+        'sender': 'You',
+        'file_name': 'recording',
+        'file_url': '/tmp/recording',
+        'mime_type': 'video/mp4',
+      });
+
+      expect(m.isVideo, isTrue);
+      expect(m.isImage, isFalse);
+    });
+
+    test('a document is never mistaken for a video', () {
+      final m = ChatMessageModel.fromJson({
+        'id': 61,
+        'body': '',
+        'sender_id': 7,
+        'sender': {'id': 7, 'name': 'Ana'},
+        'file_url': 'http://example.test/storage/chat_attachments/n.pdf',
+        'file_type': 'document',
+        'file_name': 'notes.pdf',
+        'mime_type': 'application/pdf',
+      });
+
+      expect(m.isVideo, isFalse);
+      expect(m.isImage, isFalse);
+    });
   });
 }
