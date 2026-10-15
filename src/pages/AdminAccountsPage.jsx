@@ -11,7 +11,7 @@ import AdminLayout from "../components/AdminLayout";
 import ConfirmModal from "../components/ConfirmModal";
 import { useConfirm } from "../components/useConfirm";
 import DataTable from "../components/DataTable";
-import { PageHeader, StatusBadge, btnPrimary, tableActionBtn, tableActionDanger } from "../components/ui";
+import { PageHeader, StatusBadge, UserAvatar, btnPrimary, tableActionBtn, tableActionDanger } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
 import { TRINIDAD_BARANGAYS } from "../config/community";
 import {
@@ -233,11 +233,14 @@ export default function AdminAccountsPage() {
       filter: { type: "text" },
       strong: true,
       render: (u) => (
-        <div>
-          <p>{u.name}{u.id === me?.id ? " (you)" : ""}</p>
-          {u.student_status ? (
-            <p className="text-xs text-sky-700">🎓 {u.student_school || "Student"}</p>
-          ) : null}
+        <div className="flex items-center gap-2">
+          <UserAvatar name={u.name} url={u.avatar_url} size={32} />
+          <div>
+            <p>{u.name}{u.id === me?.id ? " (you)" : ""}</p>
+            {u.student_status ? (
+              <p className="text-xs text-sky-700">🎓 {u.student_school || "Student"}</p>
+            ) : null}
+          </div>
         </div>
       ),
     },

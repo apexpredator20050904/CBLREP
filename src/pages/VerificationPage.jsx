@@ -11,6 +11,7 @@ import {
   FilterBar,
   StatusBadge,
   TableCard,
+  UserAvatar,
   selectClass,
   tableActionBtn,
   tableActionDanger,
@@ -125,7 +126,12 @@ export default function VerificationPage() {
             ) : (
               data.pending.map((u) => (
                 <tr key={u.id} className="hover:bg-stone-50">
-                  <td className={tdStrongClass}>{u.fullName}</td>
+                  <td className={tdStrongClass}>
+                    <div className="flex items-center gap-3">
+                      <UserAvatar name={u.fullName} url={u.avatar_url} />
+                      <span>{u.fullName}</span>
+                    </div>
+                  </td>
                   <td className={tdClass}>{u.email}</td>
                   <td className={tdClass}>{u.barangay}</td>
                   <td className={tdClass}>

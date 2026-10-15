@@ -190,3 +190,35 @@ export const theadClass = "bg-stone-50 text-xs uppercase tracking-wide text-ston
 export const thClass = "px-4 py-3 font-bold";
 export const tdClass = "px-4 py-3 text-stone-700";
 export const tdStrongClass = "px-4 py-3 font-semibold text-emerald-950";
+
+/**
+ * Member avatar: the uploaded photo when present, otherwise the member's
+ * initials on a brand-green disc. The initials render underneath and the
+ * photo overlays them, so a broken/expired URL degrades gracefully to the
+ * initials (matching the mobile app) instead of a broken-image icon.
+ *
+ * Used in the verification queue and the users directory so a reviewer can
+ * put a face to a submitted document.
+ */
+export function UserAvatar({ name, url, size = 36, className = "" }) {
+  const initial = (name || "?").trim().charAt(0).toUpperCase() || "?";
+  return (
+    <span
+      style={{ width: size, height: size }}
+      className={`relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-800 text-xs font-bold text-white ${className}`}
+      aria-hidden="true"
+    >
+      {initial}
+      {url ? (
+        <img
+          src={url}
+          alt={name || "Member"}
+          className="absolute inset-0 h-full w-full object-cover"
+          onError={(e) => {
+            e.currentTarget.style.display = "none";
+          }}
+        />
+      ) : null}
+    </span>
+  );
+}
