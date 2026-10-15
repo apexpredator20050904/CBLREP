@@ -226,6 +226,71 @@ class PublicListingsFeedTest extends TestCase
         $this->assertSame('Purok 3', $row['purok_sitio']);
     }
 
+    public function test_verified_residents_listings_rank_above_unverified_ones(): void
+    {
+        $categoryId = Category::firstOrCreate(['name' => 'Tools'])->id;
+
+        // The verified listing is created FIRST (older, lower id), so plain
+        // newest-first ordering alone would place the unverified listing above
+        // it. Only the verification payoff can invert that.
+        $verified = User::create([
+            'name' => 'Verified '.uniqid(),
+            'email' => 'verified-'.uniqid().'@example.test',
+            'password' => bcrypt('secret1234'),
+            'role' => 'user',
+        ]);
+        $verified->forceFill(['is_verified' => true, 'verification_status' => 'verified'])->save();
+
+        $unverified = User::create([
+            'name' => 'Unverified '.uniqid(),
+            'email' => 'unverified-'.uniqid().'@example.test',
+            'password' => bcrypt('secret1234'),
+            'role' => 'user',
+        ]);
+        $unverified->forceFill(['is_verified' => false, 'verification_status' => 'pending'])->save();
+
+        $verifiedListing = Resource::create([
+            'user_id' => $verified->id,
+            'category_id' => $categoryId,
+            'type' => 'offer',
+            'compensation_type' => 'barter',
+            'title' => 'ZZTEST verified '.uniqid(),
+            'description' => '',
+            'condition' => 'Good',
+            'location' => 'Poblacion, Purok 3',
+            'barangay' => 'Poblacion',
+            'purok_sitio' => 'Purok 3',
+            'is_active' => true,
+            'status' => 'active',
+        ]);
+        $unverifiedListing = Resource::create([
+            'user_id' => $unverified->id,
+            'category_id' => $categoryId,
+            'type' => 'offer',
+            'compensation_type' => 'barter',
+            'title' => 'ZZTEST unverified '.uniqid(),
+            'description' => '',
+            'condition' => 'Good',
+            'location' => 'Poblacion, Purok 3',
+            'barangay' => 'Poblacion',
+            'purok_sitio' => 'Purok 3',
+            'is_active' => true,
+            'status' => 'active',
+        ]);
+
+        $ids = array_column($this->getJson('/api/listings?per_page=100')->assertOk()->json('listings'), 'id');
+        $verifiedIndex = array_search($verifiedListing->id, $ids, true);
+        $unverifiedIndex = array_search($unverifiedListing->id, $ids, true);
+
+        $this->assertNotFalse($verifiedIndex, 'The verified fixture must be in the feed.');
+        $this->assertNotFalse($unverifiedIndex, 'The unverified fixture must be in the feed.');
+        $this->assertLessThan(
+            $unverifiedIndex,
+            $verifiedIndex,
+            'A verified resident\'s listing must rank above an unverified one.'
+        );
+    }
+
     public function test_the_removed_presence_endpoint_is_gone(): void
     {
         $this->getJson('/api/presence')->assertNotFound();

@@ -29,6 +29,10 @@
 !/storage/app/public/.gitignore
 /storage/app/private/*
 !/storage/app/private/.gitignore
+# Proof-of-residency documents now live on the `local` (private) disk, served
+# only through the authenticated admin route. Private user data — never commit.
+/storage/app/verification-documents/*
+!/storage/app/verification-documents/.gitignore
 # Firebase service-account key (server-side push credential) — never commit.
 /storage/app/firebase/*
 !/storage/app/firebase/.gitignore

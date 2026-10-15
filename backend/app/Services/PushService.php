@@ -6,6 +6,7 @@ use App\Models\DeviceToken;
 use Illuminate\Support\Facades\Log;
 use Kreait\Firebase\Contract\Messaging;
 use Kreait\Firebase\Factory;
+use Kreait\Firebase\Messaging\AndroidConfig;
 use Kreait\Firebase\Messaging\CloudMessage;
 use Kreait\Firebase\Messaging\Notification;
 
@@ -36,8 +37,10 @@ class PushService
      * Pushes a notification to every device the given member has registered.
      *
      * @param  array<string, mixed>  $data  extra data payload (coerced to strings)
+     * @param  string|null  $channel  Android notification channel id; lets a
+     *                                member mute one category without muting all
      */
-    public function sendToUser(int $userId, string $title, string $body, array $data = []): void
+    public function sendToUser(int $userId, string $title, string $body, array $data = [], ?string $channel = null): void
     {
         $tokens = DeviceToken::where('user_id', $userId)->pluck('token')->all();
 
@@ -45,7 +48,7 @@ class PushService
             return;
         }
 
-        $this->sendToTokens($tokens, $title, $body, $data);
+        $this->sendToTokens($tokens, $title, $body, $data, $channel);
     }
 
     /**
@@ -55,7 +58,7 @@ class PushService
      * @param  list<string>  $tokens
      * @param  array<string, mixed>  $data
      */
-    public function sendToTokens(array $tokens, string $title, string $body, array $data = []): void
+    public function sendToTokens(array $tokens, string $title, string $body, array $data = [], ?string $channel = null): void
     {
         $tokens = array_values(array_filter(
             $tokens,
@@ -85,6 +88,14 @@ class PushService
         $message = CloudMessage::new()
             ->withNotification(Notification::create($title, $body))
             ->withData($payload);
+
+        // Route the system notification to a per-category channel when one is
+        // given, so Android's own channel controls can mute a single category.
+        if ($channel !== null && $channel !== '') {
+            $message = $message->withAndroidConfig(AndroidConfig::fromArray([
+                'notification' => ['channel_id' => $channel],
+            ]));
+        }
 
         try {
             $report = $messaging->sendMulticast($message, $tokens);

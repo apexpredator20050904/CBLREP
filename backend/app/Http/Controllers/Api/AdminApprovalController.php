@@ -5,7 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\Exchange;
-use App\Models\MemberNotification;
+use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -86,14 +86,15 @@ class AdminApprovalController extends Controller
         // Notify both parties.
         foreach (array_filter([$exchange->provider_id, $exchange->receiver_id]) as $userId) {
             try {
-                MemberNotification::create([
-                    'user_id' => $userId,
-                    'type' => 'exchange_update',
-                    'title' => 'Exchange '.ucfirst($target),
-                    'body' => 'Exchange "'.$label.'" was marked '.$target.' by an administrator'
+                app(NotificationService::class)->notify(
+                    (int) $userId,
+                    NotificationService::CATEGORY_EXCHANGES,
+                    'exchange_update',
+                    'Exchange '.ucfirst($target),
+                    'Exchange "'.$label.'" was marked '.$target.' by an administrator'
                         .(($reason = trim((string) ($validated['reason'] ?? ''))) !== '' ? ': '.$reason : '.'),
-                    'data' => ['exchange_id' => $exchange->id, 'status' => $dbStatus],
-                ]);
+                    ['exchange_id' => $exchange->id, 'status' => $dbStatus],
+                );
             } catch (\Throwable $e) {
                 report($e);
             }

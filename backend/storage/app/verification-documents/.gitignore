@@ -1,0 +1,6 @@
+*
+!.gitignore
+
+# Proof-of-residency documents (address / valid-ID images), written to the
+# `local` disk. This is private user data, served only through the
+# authenticated admin route — never commit it.

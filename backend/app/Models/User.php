@@ -2,13 +2,14 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\CanonicalizesPurokSitio;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
 {
-    use HasApiTokens, Notifiable;
+    use CanonicalizesPurokSitio, HasApiTokens, Notifiable;
 
     public const ROLE_USER = 'user';
     public const ROLE_ADMIN = 'admin';
@@ -23,6 +24,9 @@ class User extends Authenticatable
 
         protected $fillable = [
         'name',
+        // Relative path on the public disk (avatars/…). Handled by the
+        // avatar endpoints, never set from a bulk profile payload.
+        'avatar_path',
         'email',
         'password',
         'role',
@@ -93,7 +97,59 @@ class User extends Authenticatable
             // it is ever rotated, every enrolled admin must re-enrol.
             'two_factor_secret' => 'encrypted',
             'two_factor_recovery_codes' => 'encrypted:array',
+            'notification_preferences' => 'array',
         ];
+    }
+
+    // ------------------------------------------------------------------
+    // Push-notification preferences
+    // ------------------------------------------------------------------
+
+    /** The categories a member can tune independently in Settings. */
+    public const NOTIFICATION_CATEGORIES = ['messages', 'exchanges', 'announcements', 'account'];
+
+    /**
+     * The member's effective preferences, with every category defaulting on.
+     *
+     * `notification_preferences` is null until the member ever touches a
+     * toggle, so a missing key must read as "enabled" rather than "off".
+     *
+     * @return array{enabled: bool, messages: bool, exchanges: bool, announcements: bool, account: bool}
+     */
+    public function notificationPreferences(): array
+    {
+        $stored = is_array($this->notification_preferences) ? $this->notification_preferences : [];
+
+        $effective = ['enabled' => true];
+        foreach (self::NOTIFICATION_CATEGORIES as $category) {
+            $effective[$category] = true;
+        }
+
+        foreach ($effective as $key => $default) {
+            if (array_key_exists($key, $stored)) {
+                $effective[$key] = (bool) $stored[$key];
+            }
+        }
+
+        return $effective;
+    }
+
+    /**
+     * Whether an FCM push for the given category may be sent to this member.
+     *
+     * The master `enabled` switch wins: turning push off silences every
+     * category regardless of the individual toggles. The in-app inbox row is
+     * always recorded by NotificationService — this only gates the push.
+     */
+    public function wantsPush(string $category): bool
+    {
+        $prefs = $this->notificationPreferences();
+
+        if ($prefs['enabled'] === false) {
+            return false;
+        }
+
+        return ($prefs[$category] ?? true) !== false;
     }
 
     // ------------------------------------------------------------------
@@ -300,6 +356,22 @@ class User extends Authenticatable
         };
     }
 
+    // ------------------------------------------------------------------
+    // Profile photo
+    // ------------------------------------------------------------------
+
+    /**
+     * Absolute URL for the member's profile photo, or null when they have none.
+     *
+     * Mirrors Resource::toFrontendListing()'s image handling: the stored value
+     * is a relative path and the client rewrites the origin to whichever API
+     * base actually won (LAN, emulator alias, or the shipped host).
+     */
+    public function avatarUrl(): ?string
+    {
+        return filled($this->avatar_path) ? asset('storage/'.$this->avatar_path) : null;
+    }
+
     /**
      * Shape consumed by the admin users pages.
      */
@@ -309,6 +381,7 @@ class User extends Authenticatable
             'id' => $this->id,
             'name' => $this->name,
             'fullName' => $this->name,
+            'avatar_url' => $this->avatarUrl(),
             'email' => $this->email,
             'role' => $this->roleLabel(),
             'raw_role' => $this->role,

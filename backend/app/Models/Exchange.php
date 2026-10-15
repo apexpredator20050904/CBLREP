@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\CanonicalizesPurokSitio;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -21,6 +22,8 @@ use Illuminate\Database\Eloquent\Model;
  */
 class Exchange extends Model
 {
+    use CanonicalizesPurokSitio;
+
     public const TYPE_BARTER = 'barter';
 
     /** The only live exchange type. Everything else was retired. */

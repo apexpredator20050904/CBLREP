@@ -6,8 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Announcement;
 use App\Models\AuditLog;
 use App\Models\ContentPage;
-use App\Models\MemberNotification;
 use App\Models\User;
+use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
@@ -187,16 +187,19 @@ class ContentAdminController extends Controller
                 $query->whereIn('role', ['user', 'admin']);
             }
         })->pluck('id');
-        foreach ($recipients as $userId) {
-            MemberNotification::firstOrCreate([
-                'user_id' => $userId,
-                'announcement_id' => $item->id,
-            ], [
-                'type' => 'announcement',
-                'title' => $item->title,
-                'body' => $item->body,
-            ]);
-        }
+
+        // Batched fan-out: one FCM call per 500 tokens rather than one per
+        // member. Unique by announcement so re-sending neither duplicates the
+        // row nor fires a second push.
+        app(NotificationService::class)->notifyMany(
+            $recipients->map(static fn ($id) => (int) $id)->all(),
+            NotificationService::CATEGORY_ANNOUNCEMENTS,
+            'announcement',
+            $item->title,
+            $item->body,
+            ['announcement_id' => $item->id],
+            ['announcement_id' => $item->id],
+        );
     }
 
     public function notifDestroy(Request $request, $id)
