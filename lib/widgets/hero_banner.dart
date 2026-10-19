@@ -183,7 +183,7 @@ class HeroBanner extends StatelessWidget {
               scrollDirection: Axis.horizontal,
               padding: EdgeInsets.zero,
               itemCount: trinidadBarangays.length + 1,
-              separatorBuilder: (_, __) => const SizedBox(width: 6),
+              separatorBuilder: (_, _) => const SizedBox(width: 6),
               itemBuilder: (context, index) {
                 final value = index == 0 ? '' : trinidadBarangays[index - 1];
                 final selected = value == selectedBarangay;
