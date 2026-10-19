@@ -88,7 +88,7 @@ void main() {
     await server.close(force: true);
   });
 
-  Widget _host({String type = ReportTarget.listing}) => MaterialApp(
+  Widget host({String type = ReportTarget.listing}) => MaterialApp(
         theme: CblrepTheme.lightCream,
         home: Scaffold(
           body: ReportSheet(
@@ -111,7 +111,7 @@ void main() {
   group('ReportSheet', () {
     testWidgets('offers every reason the backend accepts', (tester) async {
       await useTallSurface(tester);
-      await tester.pumpWidget(_host());
+      await tester.pumpWidget(host());
       await tester.pumpAndSettle();
 
       expect(find.text('Report this posting'), findsOneWidget);
@@ -129,7 +129,7 @@ void main() {
 
     testWidgets('titles itself for an account report', (tester) async {
       await useTallSurface(tester);
-      await tester.pumpWidget(_host(type: ReportTarget.user));
+      await tester.pumpWidget(host(type: ReportTarget.user));
       await tester.pumpAndSettle();
 
       expect(find.text('Report this account'), findsOneWidget);
@@ -137,7 +137,7 @@ void main() {
 
     testWidgets('refuses to send an incomplete report', (tester) async {
       await useTallSurface(tester);
-      await tester.pumpWidget(_host());
+      await tester.pumpWidget(host());
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Submit report'));
@@ -154,7 +154,7 @@ void main() {
     testWidgets('sends the chosen reason and the optional detail',
         (tester) async {
       await useTallSurface(tester);
-      await tester.pumpWidget(_host());
+      await tester.pumpWidget(host());
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Scam or fraud'));
@@ -185,7 +185,7 @@ void main() {
     testWidgets('sends a report without a description when none was typed',
         (tester) async {
       await useTallSurface(tester);
-      await tester.pumpWidget(_host());
+      await tester.pumpWidget(host());
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Harassment or abuse'));
@@ -210,7 +210,7 @@ void main() {
       failWithBody = '{"message":"You have already reported this."}';
 
       await useTallSurface(tester);
-      await tester.pumpWidget(_host());
+      await tester.pumpWidget(host());
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Counterfeit or fake'));

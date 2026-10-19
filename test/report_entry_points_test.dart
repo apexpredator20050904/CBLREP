@@ -31,7 +31,7 @@ class _QuietChatProvider extends ChatProvider {
 }
 
 void main() {
-  ListingModel _listing({required int ownerId}) => ListingModel(
+  ListingModel listing({required int ownerId}) => ListingModel(
         id: 1,
         title: 'A borrowed drill',
         description: 'Works fine.',
@@ -49,7 +49,7 @@ void main() {
         active: true,
       );
 
-  UserModel _user(int id) => UserModel(
+  UserModel member(int id) => UserModel(
         id: id,
         name: 'Test Member',
         email: 'member@example.test',
@@ -84,7 +84,7 @@ void main() {
 
     testWidgets('offers report actions to a visitor', (tester) async {
       await useTallSurface(tester);
-      await tester.pumpWidget(host(_listing(ownerId: 7), _user(99)));
+      await tester.pumpWidget(host(listing(ownerId: 7), member(99)));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byIcon(Icons.more_vert));
@@ -96,7 +96,7 @@ void main() {
 
     testWidgets('opens the report sheet for the posting', (tester) async {
       await useTallSurface(tester);
-      await tester.pumpWidget(host(_listing(ownerId: 7), _user(99)));
+      await tester.pumpWidget(host(listing(ownerId: 7), member(99)));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byIcon(Icons.more_vert));
@@ -112,7 +112,7 @@ void main() {
     testWidgets('does not offer a report action on your own listing',
         (tester) async {
       await useTallSurface(tester);
-      await tester.pumpWidget(host(_listing(ownerId: 7), _user(7)));
+      await tester.pumpWidget(host(listing(ownerId: 7), member(7)));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byIcon(Icons.more_vert));
@@ -136,7 +136,7 @@ void main() {
     Widget host({required int userId, required bool canReport}) => MultiProvider(
           providers: [
             ChangeNotifierProvider<AuthProvider>(
-              create: (_) => AuthProvider(ApiService.instance)..user = _user(99),
+              create: (_) => AuthProvider(ApiService.instance)..user = member(99),
             ),
           ],
           child: MaterialApp(
@@ -195,7 +195,7 @@ void main() {
       await tester.pumpWidget(MultiProvider(
         providers: [
           ChangeNotifierProvider<AuthProvider>(
-            create: (_) => AuthProvider(ApiService.instance)..user = _user(99),
+            create: (_) => AuthProvider(ApiService.instance)..user = member(99),
           ),
           ChangeNotifierProvider<ChatProvider>.value(value: chat),
         ],

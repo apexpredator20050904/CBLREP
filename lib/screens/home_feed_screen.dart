@@ -406,8 +406,8 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
                     sliver: SliverList.separated(
                       itemCount: 4,
-                      separatorBuilder: (_, __) => const SizedBox(height: 12),
-                      itemBuilder: (_, __) => const ListingSkeletonCard(),
+                      separatorBuilder: (_, _) => const SizedBox(height: 12),
+                      itemBuilder: (_, _) => const ListingSkeletonCard(),
                     ),
                   )
                 else if (visible.isEmpty)
@@ -440,7 +440,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
                     sliver: SliverList.separated(
                       itemCount: visible.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 12),
+                      separatorBuilder: (_, _) => const SizedBox(height: 12),
                       itemBuilder: (context, i) {
                         final listing = visible[i];
                         return RepaintBoundary(

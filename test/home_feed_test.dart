@@ -160,7 +160,7 @@ void main() {
     await server.close(force: true);
   });
 
-  UserModel _member() => const UserModel(
+  UserModel member() => const UserModel(
         id: 2,
         name: 'Juan Dela Cruz',
         email: 'juan@example.test',
@@ -170,7 +170,7 @@ void main() {
         verificationStatus: 'Verified',
       );
 
-  ListingModel _listing({int id = 100, String wanted = '5 kg of rice'}) =>
+  ListingModel listing({int id = 100, String wanted = '5 kg of rice'}) =>
       ListingModel(
         id: id,
         title: 'Second-hand rice cooker',
@@ -192,7 +192,7 @@ void main() {
 
   /// A provider that never touches the network — used by the tests that only
   /// care about how the feed renders a given state.
-  Widget _host({
+  Widget host({
     List<ListingModel> listings = const [],
     bool loading = false,
     bool withProviders = true,
@@ -207,7 +207,7 @@ void main() {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider<AuthProvider>(
-          create: (_) => AuthProvider(ApiService.instance)..user = _member(),
+          create: (_) => AuthProvider(ApiService.instance)..user = member(),
         ),
         ChangeNotifierProvider<ListingsProvider>(
           create: (_) => _StaticListingsProvider(
@@ -253,7 +253,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
 
-      await pumpFeed(tester, _host(listings: [_listing()]));
+      await pumpFeed(tester, host(listings: [listing()]));
 
       expect(find.textContaining('Maayong'), findsOneWidget,
           reason: 'The hero must greet the member in the local language.');
@@ -273,7 +273,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
 
-      await pumpFeed(tester, _host(listings: [_listing()]));
+      await pumpFeed(tester, host(listings: [listing()]));
 
       expect(find.text('Search offers and needs'), findsOneWidget);
       expect(find.text('Tools'), findsOneWidget);
@@ -296,7 +296,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
 
-      await pumpLoadingFeed(tester, _host(loading: true));
+      await pumpLoadingFeed(tester, host(loading: true));
 
       expect(find.byType(ListingSkeletonCard), findsWidgets,
           reason: 'A loading feed must show skeletons, not a bare spinner.');
@@ -309,7 +309,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
 
-      await pumpFeed(tester, _host());
+      await pumpFeed(tester, host());
 
       expect(find.text('No listings yet'), findsOneWidget);
       expect(find.textContaining('Be the first'), findsOneWidget);
@@ -320,7 +320,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
 
-      await pumpFeed(tester, _host(listings: [_listing()]));
+      await pumpFeed(tester, host(listings: [listing()]));
 
       expect(find.byType(ListingCard), findsOneWidget);
       // The condition tag.
@@ -343,7 +343,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
 
-      await pumpFeed(tester, _host(listings: [_listing()]));
+      await pumpFeed(tester, host(listings: [listing()]));
 
       expect(tester.takeException(), isNull,
           reason: 'A 320dp phone must not overflow the redesigned feed.');
@@ -354,7 +354,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
 
-      await pumpFeed(tester, _host(listings: [_listing()]));
+      await pumpFeed(tester, host(listings: [listing()]));
 
       expect(tester.takeException(), isNull);
     });
@@ -371,7 +371,7 @@ void main() {
         MultiProvider(
           providers: [
             ChangeNotifierProvider<AuthProvider>(
-              create: (_) => AuthProvider(ApiService.instance)..user = _member(),
+              create: (_) => AuthProvider(ApiService.instance)..user = member(),
             ),
             ChangeNotifierProvider<ListingsProvider>(
               create: (_) => ListingsProvider(ApiService.instance),
