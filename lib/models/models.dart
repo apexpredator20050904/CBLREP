@@ -524,3 +524,137 @@ class MessageModel {
         sentAt: DateTime.tryParse('${json['created_at'] ?? ''}'),
       );
 }
+
+/// A published municipal content page served by `GET /api/page/{slug}`.
+///
+/// [body] is HTML authored in the admin console (Notifications → Content), so
+/// the viewer renders it with `flutter_widget_from_html` rather than a plain
+/// Text widget.
+/// Drafts never reach this model — the backend only serves rows with
+/// `status = published AND published_at IS NOT NULL` and 404s everything else.
+class ContentPageModel {
+  final int id;
+  final String title;
+  final String slug;
+  final String body;
+  final DateTime? publishedAt;
+
+  const ContentPageModel({
+    required this.id,
+    required this.title,
+    required this.slug,
+    required this.body,
+    this.publishedAt,
+  });
+
+  factory ContentPageModel.fromJson(Map<String, dynamic> json) => ContentPageModel(
+        id: (json['id'] as num?)?.toInt() ?? 0,
+        title: (json['title'] ?? '') as String,
+        slug: (json['slug'] ?? '') as String,
+        body: (json['body'] ?? '') as String,
+        publishedAt: DateTime.tryParse('${json['published_at'] ?? ''}'),
+      );
+}
+
+/// What a member is reporting.
+///
+/// The backend stores this pair as plain columns (`listing` / `user`) rather
+/// than an Eloquent morph type, so the client speaks exactly the vocabulary
+/// the server stores.
+class ReportTarget {
+  static const String listing = 'listing';
+
+  static const String user = 'user';
+
+  static const List<String> all = [listing, user];
+
+  /// Human label for the sheet title and the confirmation message.
+  static String label(String target) => target == user ? 'account' : 'listing';
+}
+
+/// The closed vocabulary of report reasons.
+///
+/// The backend validates against exactly these values, so a reason can never
+/// be misspelled on the way to the moderation queue.
+class ReportReason {
+  static const String scam = 'scam';
+
+  static const String inappropriateContent = 'inappropriate_content';
+
+  static const String counterfeit = 'counterfeit';
+
+  static const String harassment = 'harassment';
+
+  static const String other = 'other';
+
+  static const List<String> all = [
+    scam,
+    inappropriateContent,
+    counterfeit,
+    harassment,
+    other,
+  ];
+
+  /// Short label shown in the picker.
+  static String label(String reason) => switch (reason) {
+        scam => 'Scam or fraud',
+        inappropriateContent => 'Inappropriate content',
+        counterfeit => 'Counterfeit or fake',
+        harassment => 'Harassment or abuse',
+        other => 'Something else',
+        _ => 'Other',
+      };
+
+  /// One line explaining what the moderator will do with this report.
+  static String explanation(String reason) => switch (reason) {
+        scam => 'Someone is asking for money, a deposit, or an advance payment.',
+        inappropriateContent => 'The post shows offensive, adult, or unsafe content.',
+        counterfeit => 'The item is a fake, a knock-off, or not what it claims to be.',
+        harassment => 'The member is threatening, insulting, or stalking others.',
+        other => 'Anything else that puts the community at risk.',
+        _ => '',
+      };
+}
+
+/// A community safety report filed by a member.
+///
+/// Mirrors the `reports` table: who filed it, what was reported, why, and
+/// where it sits in the moderation lifecycle.
+class ReportModel {
+  final int id;
+  final int? reporterId;
+  final String reportableType;
+  final int reportableId;
+  final String reason;
+  final String? description;
+  final String status;
+  final String? subjectLabel;
+  final DateTime? createdAt;
+
+  const ReportModel({
+    required this.id,
+    this.reporterId,
+    required this.reportableType,
+    required this.reportableId,
+    required this.reason,
+    this.description,
+    required this.status,
+    this.subjectLabel,
+    this.createdAt,
+  });
+
+  /// True while the report is still waiting for a moderator.
+  bool get isPending => status == 'pending';
+
+  factory ReportModel.fromJson(Map<String, dynamic> json) => ReportModel(
+        id: (json['id'] as num?)?.toInt() ?? 0,
+        reporterId: (json['reporter_id'] as num?)?.toInt(),
+        reportableType: '${json['reportable_type'] ?? ReportTarget.listing}',
+        reportableId: (json['reportable_id'] as num?)?.toInt() ?? 0,
+        reason: '${json['reason'] ?? ReportReason.other}',
+        description: json['description'] as String?,
+        status: '${json['status'] ?? 'pending'}',
+        subjectLabel: json['subject_label'] as String?,
+        createdAt: DateTime.tryParse('${json['created_at'] ?? ''}'),
+      );
+}

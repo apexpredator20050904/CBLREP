@@ -4,15 +4,18 @@ import 'package:untitled1/models/models.dart';
 import 'package:untitled1/theme/cblrep_theme.dart';
 import 'package:untitled1/widgets/listing_card.dart';
 
-/// Guards the two defects these tests were written for, so they cannot come
-/// back unnoticed:
+/// Guards the defects the listing card is built to avoid:
 ///
 ///  1. A location chip whose label is not bounded (the old
 ///     `Row(mainAxisSize: min)` + unbounded `Text`) overflows as soon as the
 ///     text exceeds the available width.
-///  2. The card image was a fixed 140px inside a grid cell that shrinks on
-///     narrow devices, which clipped the body and produced a `RenderFlex
-///     overflowed` stripe.
+///  2. The card used to squeeze its body into a grid cell, so a tall cell
+///     clipped the text and produced a `RenderFlex overflowed` stripe. The
+///     card is now content-sized — a FIXED-height photo above a natural
+///     height body — so the photo is always exactly the same height and the
+///     body is never clipped.
+///  3. The two fast actions sit in a Row, so a narrow phone could push them
+///     past the card's edge. They are Expanded, which keeps them inside it.
 ListingModel _listing({String title = 'Item', String purok = 'Purok 3'}) =>
     ListingModel(
       id: 1,
@@ -31,64 +34,87 @@ ListingModel _listing({String title = 'Item', String purok = 'Purok 3'}) =>
       active: true,
     );
 
-void main() {
-  group('ListingCard regressions', () {
-    testWidgets('bare-bones card renders inside a very small cell',
-        (tester) async {
-      // 120dp is narrower than any real grid cell — if this fits, the card's
-      // minimum viable box is covered and the grid ratio cannot clip it.
-      await tester.pumpWidget(MaterialApp(
-        theme: CblrepTheme.lightCream,
-        home: Scaffold(
-          body: Center(
-            child: SizedBox(width: 120, height: 200, child: ListingCard(listing: _listing())),
+/// Hosts the card in a phone-width column with unbounded height — the shape
+/// the home feed actually gives it.
+Widget _host(ListingModel listing, {double width = 320, double? height}) =>
+    MaterialApp(
+      theme: CblrepTheme.lightCream,
+      home: Scaffold(
+        body: Center(
+          child: SizedBox(
+            width: width,
+            height: height,
+            child: ListingCard(listing: listing),
           ),
         ),
-      ));
+      ),
+    );
+
+void main() {
+  group('ListingCard regressions', () {
+    testWidgets('the card renders inside a phone-width column without overflow',
+        (tester) async {
+      // 320dp is the narrowest phone this app supports. The card is
+      // content-sized, so the column is given an unbounded height.
+      await tester.pumpWidget(_host(_listing()));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
     });
 
     testWidgets('location chip survives an extremely long purok label',
         (tester) async {
+      await tester.pumpWidget(_host(_listing(
+        title: 'Extremely long listing title that must truncate',
+        purok: 'Purok Poblacion Norte Maliksi Compound Sector 7B',
+      )));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byType(LocationChip), findsOneWidget);
+    });
+
+    testWidgets('the photo area has a fixed height so every card matches',
+        (tester) async {
+      await tester.pumpWidget(_host(_listing(), width: 360));
+      await tester.pumpAndSettle();
+
+      final card = tester.getSize(find.byType(ListingCard));
+      // The card is taller than the photo block: the body sits under it.
+      expect(card.height, greaterThan(200));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the two fast actions and the report menu are all present',
+        (tester) async {
       await tester.pumpWidget(MaterialApp(
         theme: CblrepTheme.lightCream,
         home: Scaffold(
           body: Center(
             child: SizedBox(
-              width: 140,
-              height: 220,
+              width: 320,
               child: ListingCard(
-                listing: _listing(
-                  title: 'Extremely long listing title that must truncate',
-                  purok: 'Purok Poblacion Norte Maliksi Compound Sector 7B',
-                ),
+                listing: _listing(),
+                onViewDetails: () {},
+                onPropose: () {},
+                onReport: () {},
               ),
             ),
           ),
         ),
       ));
       await tester.pumpAndSettle();
+
+      expect(find.text('View Details'), findsOneWidget);
+      expect(find.text('Propose Barter'), findsOneWidget);
+      expect(find.byIcon(Icons.more_vert), findsOneWidget);
       expect(tester.takeException(), isNull);
-      expect(find.byType(LocationChip), findsOneWidget);
     });
 
-    testWidgets('the photo area yields height to the body (not a fixed 140)',
+    testWidgets('a card with no report action shows no three-dot menu',
         (tester) async {
-      await tester.pumpWidget(MaterialApp(
-        theme: CblrepTheme.lightCream,
-        home: Scaffold(
-          body: Center(
-            child: SizedBox(width: 160, height: 260, child: ListingCard(listing: _listing())),
-          ),
-        ),
-      ));
+      await tester.pumpWidget(_host(_listing()));
       await tester.pumpAndSettle();
 
-      final card = tester.getSize(find.byType(ListingCard));
-      // A tall cell must give the extra space to the Flexible image rather
-      // than leaving it clipped or overflowing the body.
-      expect(card.height, greaterThan(200));
+      expect(find.byIcon(Icons.more_vert), findsNothing);
       expect(tester.takeException(), isNull);
     });
   });

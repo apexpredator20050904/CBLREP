@@ -585,10 +585,15 @@ class ApiService {
     }
   }
 
-  Future<List<dynamic>> listings({String? query, String? barangay}) async {
+  Future<List<dynamic>> listings({
+    String? query,
+    String? barangay,
+    String? category,
+  }) async {
     final data = await _request(_dio.get('/listings', queryParameters: {
       if (query != null && query.isNotEmpty) 'q': query,
       if (barangay != null && barangay.isNotEmpty) 'barangay': barangay,
+      if (category != null && category.isNotEmpty) 'category': category,
     })) as Map;
     return List<dynamic>.from(data['listings'] ?? data['data'] ?? const []);
   }
@@ -893,6 +898,47 @@ class ApiService {
   Future<Map<String, dynamic>> sendMessage(Map<String, dynamic> payload) async =>
       Map<String, dynamic>.from(await _request(_dio.post('/messages', data: payload)) as Map);
 
+  // ── Community safety reports ─────────────────────────────────────────
+  //
+  // A report is a statement by a named member, so the endpoint is
+  // authenticated and throttled per account on the server.
+
+  /// POST /api/reports — file a report about a listing or a member.
+  ///
+  /// [reportableType] is 'listing' or 'user' (see `ReportTarget`); the
+  /// backend rejects anything else with a 422. The returned map carries the
+  /// created report under `report`, plus a `listing_flagged` flag telling the
+  /// client that the listing has just been pulled out of the feed for a
+  /// moderator to look at.
+  Future<Map<String, dynamic>> submitReport({
+    required String reportableType,
+    required int reportableId,
+    required String reason,
+    String? description,
+  }) async {
+    return Map<String, dynamic>.from(await _request(_dio.post('/reports', data: {
+      'reportable_type': reportableType,
+      'reportable_id': reportableId,
+      'reason': reason,
+      // Only sent when the member actually wrote something — an empty string
+      // would be stored as an empty description rather than a null.
+      if (description != null && description.trim().isNotEmpty)
+        'description': description.trim(),
+    })) as Map);
+  }
+
+  /// GET /api/reports/mine — the member's own report history.
+  ///
+  /// Returns the raw rows, the same shape [listings] hands back, so this
+  /// layer stays free of model imports (models.dart depends on this file).
+  Future<List<Map<String, dynamic>>> myReports() async {
+    final data = await _request(_dio.get('/reports/mine')) as Map;
+    final rows = List<dynamic>.from(data['reports'] ?? const []);
+    return rows
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
   Future<Map<String, dynamic>> platformStatus() async =>
       Map<String, dynamic>.from(await _request(_dio.get('/platform/status')) as Map);
 
@@ -900,4 +946,18 @@ class ApiService {
   /// Public endpoint — no token required.
   Future<Map<String, dynamic>> appVersion() async =>
       Map<String, dynamic>.from(await _request(_dio.get('/app-version')) as Map);
+
+  /// GET /api/page/{slug} — one published municipal content page.
+  ///
+  /// Public endpoint — no token required. The backend only serves rows with
+  /// `status = published AND published_at IS NOT NULL`, so a draft or an
+  /// unknown slug answers 404 and surfaces here as [ApiException]; the two
+  /// cases are deliberately indistinguishable to the client. This is the same
+  /// endpoint the admin console's public /page/:slug web route consumes.
+  Future<Map<String, dynamic>> fetchPage(String slug) async {
+    final data = Map<String, dynamic>.from(
+      await _request(_dio.get('/page/${Uri.encodeComponent(slug)}')) as Map,
+    );
+    return Map<String, dynamic>.from(data['page'] as Map);
+  }
 }

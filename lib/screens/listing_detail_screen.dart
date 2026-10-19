@@ -8,6 +8,9 @@ import '../models/models.dart';
 import '../providers/auth_provider.dart';
 import '../providers/listings_provider.dart';
 import '../theme/cblrep_theme.dart';
+import '../widgets/member_profile_sheet.dart';
+import '../widgets/report_sheet.dart';
+import '../widgets/trade_offer_sheet.dart';
 import '../widgets/user_avatar.dart';
 import '../widgets/verified_badge.dart';
 import 'chat_screen.dart';
@@ -199,13 +202,8 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     }
     if (!await _ensureSignedIn('send a trade offer for this listing')) return;
     if (!mounted) return;
-    final sent = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _TradeOfferSheet(listing: widget.listing),
-    );
-    if (sent == true && mounted) {
+    final sent = await showTradeOfferSheet(context, widget.listing);
+    if (sent && mounted) {
       Feedback.success(context, 'Trade offer sent. Track it in Exchanges.');
     }
   }
@@ -243,6 +241,60 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
         _ => 'Message / Inquire',
       };
 
+  /// Report the posting from the details screen's three-dot menu.
+  Future<void> _reportListing() async {
+    final sent = await showReportSheet(
+      context,
+      reportableType: ReportTarget.listing,
+      reportableId: widget.listing.id,
+      subjectName: widget.listing.title,
+    );
+    if (sent && mounted) {
+      Feedback.success(
+        context,
+        'Thank you for helping keep our community safe. '
+        'Our team will review this listing.',
+      );
+    }
+  }
+
+  /// Report the owner from the details screen's three-dot menu.
+  Future<void> _reportOwner() async {
+    final listing = widget.listing;
+    if (listing.ownerId <= 0) {
+      if (mounted) Feedback.info(context, 'This listing has no owner to report.');
+      return;
+    }
+    final sent = await showReportSheet(
+      context,
+      reportableType: ReportTarget.user,
+      reportableId: listing.ownerId,
+      subjectName: listing.owner,
+    );
+    if (sent && mounted) {
+      Feedback.success(
+        context,
+        'Thank you for helping keep our community safe. '
+        'Our team will review this account.',
+      );
+    }
+  }
+
+  /// Open the owner's profile — their name, photo, verification status and
+  /// the action to report them.
+  Future<void> _openOwner() async {
+    final listing = widget.listing;
+    final myId = context.read<AuthProvider>().user?.id;
+    await showMemberProfileSheet(
+      context,
+      name: listing.owner,
+      avatarUrl: listing.ownerAvatarUrl,
+      verified: listing.ownerVerified,
+      userId: listing.ownerId,
+      canReport: myId == null || myId != listing.ownerId,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final listing = widget.listing;
@@ -256,7 +308,66 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     final isOwner = myId != null && listing.ownerId == myId;
     return Scaffold(
       backgroundColor: dark ? CblrepColors.deepForest : null,
-      appBar: AppBar(title: const Text('Item details', style: TextStyle(fontSize: 16))),
+      appBar: AppBar(
+        title: const Text('Item details', style: TextStyle(fontSize: 16)),
+        // The three-dot menu: report the posting, and report the owner.
+        actions: [
+          PopupMenuButton<String>(
+            tooltip: 'More actions',
+            icon: Icon(Icons.more_vert, size: 20, color: dark ? Colors.white70 : null),
+            onSelected: (value) {
+              if (value == 'report_listing') _reportListing();
+              if (value == 'report_user') _reportOwner();
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'report_listing',
+                enabled: !isOwner,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.report_gmailerrorred_outlined,
+                      size: 18,
+                      color: isOwner ? Colors.black26 : CblrepColors.dangerRed,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Report posting',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isOwner ? Colors.black26 : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'report_user',
+                enabled: !isOwner && listing.ownerId > 0,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.person_off_outlined,
+                      size: 18,
+                      color: (isOwner || listing.ownerId <= 0)
+                          ? Colors.black26
+                          : CblrepColors.dangerRed,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Report user',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: (isOwner || listing.ownerId <= 0) ? Colors.black26 : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         _ListingGallery(
           images: listing.imageUrls.isNotEmpty
@@ -348,14 +459,21 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                     Text('Posted by', style: TextStyle(fontSize: 12, color: rowMuted)),
                     const SizedBox(width: 6),
                     Flexible(
-                      child: Text(
-                        listing.owner,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: rowDark ? Colors.white : Colors.black87,
+                      child: InkWell(
+                        onTap: _openOwner,
+                        borderRadius: BorderRadius.circular(4),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Text(
+                            listing.owner,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: rowDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
                         ),
                       ),
                     ),

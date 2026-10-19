@@ -16,7 +16,14 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.3.0+3
+# The build number (versionCode) must increase for every upload — Android
+# refuses a same-or-lower version code, and the in-app update channel
+# (GET /api/app-version) compares it against the installed build.
+#
+# 1.5.0 — redesigned home feed (localized hero, sticky search + filters,
+# realistic resource cards, shimmer skeletons) and the community safety
+# reporting system (report a posting or a member).
+version: 1.5.0+5
 
 environment:
   sdk: ^3.12.2
@@ -47,6 +54,7 @@ dependencies:
   flutter_local_notifications: ^22.3.2
   package_info_plus: ^9.0.1
   video_player: ^2.14.1
+  flutter_widget_from_html: ^0.17.4
 dev_dependencies:
   flutter_test:
     sdk: flutter
