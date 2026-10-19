@@ -101,6 +101,10 @@ class CommunitySeeder extends Seeder
     /**
      * Every photograph path any listing currently references.
      *
+     * `image_paths` is cast to an array on the model, so a plucked value can
+     * already be a decoded array; a row written before the cast can still be
+     * a JSON string. Both shapes are accepted here.
+     *
      * @return array<int,string>
      */
     private function photoPathsOfEveryListing(): array
@@ -108,7 +112,8 @@ class CommunitySeeder extends Seeder
         $paths = Resource::pluck('image_path')->filter()->all();
 
         foreach (Resource::pluck('image_paths')->filter() as $gallery) {
-            foreach ((array) json_decode($gallery, true) as $path) {
+            $list = is_string($gallery) ? json_decode($gallery, true) : $gallery;
+            foreach ((array) $list as $path) {
                 if (is_string($path) && $path !== '') {
                     $paths[] = $path;
                 }
