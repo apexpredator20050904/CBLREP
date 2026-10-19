@@ -106,7 +106,7 @@ class User extends Authenticatable
     // ------------------------------------------------------------------
 
     /** The categories a member can tune independently in Settings. */
-    public const NOTIFICATION_CATEGORIES = ['messages', 'exchanges', 'announcements', 'account'];
+    public const NOTIFICATION_CATEGORIES = ['messages', 'exchanges', 'announcements', 'account', 'updates'];
 
     /**
      * The member's effective preferences, with every category defaulting on.

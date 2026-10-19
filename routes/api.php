@@ -165,6 +165,12 @@ Route::middleware('auth:sanctum')->group(function () {
     // Member announcements and action notifications.
     Route::get('/notifications', [NotificationController::class, 'index']);
     Route::put('/notifications/{id}/read', [NotificationController::class, 'read']);
+    // Mark the whole inbox as read, and let a member clear their history.
+    // The literal segments are declared before the {id} routes so they can
+    // never be swallowed by the parameterised ones.
+    Route::put('/notifications/read-all', [NotificationController::class, 'readAll']);
+    Route::delete('/notifications', [NotificationController::class, 'destroyAll']);
+    Route::delete('/notifications/{id}', [NotificationController::class, 'destroy']);
 
     // Push-notification preferences (the server-side mirror of the mobile
     // Settings toggles; only the server can actually gate an FCM send).

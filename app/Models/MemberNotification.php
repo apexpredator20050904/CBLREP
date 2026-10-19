@@ -10,6 +10,10 @@ class MemberNotification extends Model
         'user_id',
         'announcement_id',
         'type',
+        // The release an "a new version is available" row refers to. It is the
+        // dedup key for that notification type, so re-announcing the same
+        // release never records the row twice.
+        'app_version_code',
         'title',
         'body',
         'data',
