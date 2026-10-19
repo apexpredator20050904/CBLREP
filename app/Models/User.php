@@ -181,6 +181,18 @@ class User extends Authenticatable
         return $this->hasMany(DeviceToken::class);
     }
 
+    /**
+     * Community safety reports this member filed.
+     *
+     * The relation is nullable on the reports table (a report outlives the
+     * account that filed it), so this only returns the reports of members
+     * who still exist.
+     */
+    public function reports()
+    {
+        return $this->hasMany(Report::class, 'reporter_id');
+    }
+
     // ------------------------------------------------------------------
     // Helpers used by the admin controllers
     // ------------------------------------------------------------------

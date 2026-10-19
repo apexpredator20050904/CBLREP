@@ -40,6 +40,27 @@ class ListingController extends Controller
         if ($barangay = trim((string) $request->query('barangay', ''))) {
             $query->where('barangay', $barangay);
         }
+        if ($category = trim((string) $request->query('category', ''))) {
+            // Filtered by the category NAME, the same vocabulary the client
+            // shows on its chips. An unknown category is not an error — it is
+            // simply a category nobody has posted under yet, so the feed
+            // answers with an empty page rather than a 422.
+            $categoryId = Category::where('name', $category)->value('id');
+            if ($categoryId === null) {
+                return response()->json([
+                    'listings' => [],
+                    'data' => [],
+                    'meta' => [
+                        'current_page' => 1,
+                        'last_page' => 1,
+                        'per_page' => 0,
+                        'total' => 0,
+                        'has_more' => false,
+                    ],
+                ]);
+            }
+            $query->where('category_id', $categoryId);
+        }
         if ($q = trim((string) $request->query('q', ''))) {
             // Length-capped: an unbounded search term is a wider full scan and
             // the field is a LIKE across several columns either way.

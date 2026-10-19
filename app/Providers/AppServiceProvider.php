@@ -80,5 +80,14 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('public-read', fn (Request $request) => [
             Limit::perMinute(120)->by('public-read:'.$request->ip()),
         ]);
+
+        // Community safety reports. Keyed by the member (not the IP), because
+        // the request is authenticated by the time the limiter resolves and
+        // the member id is the meaningful axis: one account must not be able
+        // to bury the moderation queue under hundreds of rows, and members
+        // behind a single NAT address must not throttle each other.
+        RateLimiter::for('report-create', fn (Request $request) => [
+            Limit::perMinute(10)->by('report:'.($request->user()?->id ?? $request->ip())),
+        ]);
     }
 }

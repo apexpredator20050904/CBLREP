@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\Category;
+use App\Models\ContentPage;
 use App\Models\Conversation;
 use App\Models\Exchange;
 use App\Models\MemberNotification;
@@ -47,6 +48,7 @@ class DemoSeeder extends Seeder
         $listings = $this->seedListings($members, $categories);
         $this->seedExchanges($members, $listings);
         $this->seedConversations($members, $listings);
+        $this->seedExampleContentPage();
 
         $this->command->info('─────────────────────────────────────────────');
         $this->command->info('  Demo data ready (non-destructive)');
@@ -56,6 +58,38 @@ class DemoSeeder extends Seeder
             $this->command->info("    {$member->email}  ({$member->barangay})");
         }
         $this->command->info('─────────────────────────────────────────────');
+    }
+
+    /**
+     * Example public content page (idempotent — safe to re-run).
+     *
+     * Reachable anonymously at GET /api/page/waste-segregation-guide and, via
+     * the React public route, at /page/waste-segregation-guide — the smoke
+     * test for the public content-page feature.
+     */
+    private function seedExampleContentPage(): void
+    {
+        $adminId = User::query()->orderBy('id')->value('id');
+
+        ContentPage::firstOrCreate(
+            ['slug' => 'waste-segregation-guide'],
+            [
+                'title' => 'Waste Segregation Guide',
+                'body' => '<h2>Waste Segregation Guide</h2>'
+                    . '<p>Trinidad barangays sort household waste into three bins:</p>'
+                    . '<ul>'
+                    . '<li><strong>Green bin</strong> — organic waste (fruit peels, coffee grounds, garden trimmings).</li>'
+                    . '<li><strong>Blue bin</strong> — recyclables (plastic bottles, glass jars, steel cans, newspapers).</li>'
+                    . '<li><strong>Black bin</strong> — general refuse.</li>'
+                    . '</ul>'
+                    . '<p>Rinse all recyclables before binning and keep them dry.</p>',
+                'status' => 'published',
+                'created_by' => $adminId,
+                'published_at' => now()->subDay(),
+            ]
+        );
+
+        $this->command->info('  Public example page: /page/waste-segregation-guide');
     }
 
     /** @return array<string,Category> keyed by name */
