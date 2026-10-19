@@ -19,12 +19,18 @@ class AppSettingsProvider extends ChangeNotifier {
   static const _exchangeAlertKey = 'cblrep_exchange_alerts';
   static const _messageAlertKey = 'cblrep_message_alerts';
   static const _announcementAlertKey = 'cblrep_announcement_alerts';
+  static const _updateAlertKey = 'cblrep_update_alerts';
 
   bool darkMode = true;
   bool notificationsEnabled = true;
   bool exchangeAlerts = true;
   bool messageAlerts = true;
   bool announcementAlerts = true;
+
+  /// "A new version of the app is available" alerts. Their own category, so a
+  /// member can silence release pings without muting announcements.
+  bool updateAlerts = true;
+
   bool loaded = false;
 
   Future<void> load() async {
@@ -34,6 +40,7 @@ class AppSettingsProvider extends ChangeNotifier {
     exchangeAlerts = prefs.getBool(_exchangeAlertKey) ?? true;
     messageAlerts = prefs.getBool(_messageAlertKey) ?? true;
     announcementAlerts = prefs.getBool(_announcementAlertKey) ?? true;
+    updateAlerts = prefs.getBool(_updateAlertKey) ?? true;
     loaded = true;
     notifyListeners();
   }
@@ -69,6 +76,7 @@ class AppSettingsProvider extends ChangeNotifier {
       exchangeAlerts = data['exchanges'] as bool? ?? exchangeAlerts;
       announcementAlerts =
           data['announcements'] as bool? ?? announcementAlerts;
+      updateAlerts = data['updates'] as bool? ?? updateAlerts;
       await _persistLocal();
     } catch (_) {
       // Leave the cached values in place.
@@ -110,12 +118,20 @@ class AppSettingsProvider extends ChangeNotifier {
     await _syncToServer();
   }
 
+  Future<void> setUpdateAlerts(bool value) async {
+    updateAlerts = value;
+    notifyListeners();
+    (await SharedPreferences.getInstance()).setBool(_updateAlertKey, value);
+    await _syncToServer();
+  }
+
   Future<void> _persistLocal() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_notifKey, notificationsEnabled);
     await prefs.setBool(_exchangeAlertKey, exchangeAlerts);
     await prefs.setBool(_messageAlertKey, messageAlerts);
     await prefs.setBool(_announcementAlertKey, announcementAlerts);
+    await prefs.setBool(_updateAlertKey, updateAlerts);
   }
 
   /// Mirrors the current toggles to the server. Fire-and-forget in spirit: a
@@ -129,6 +145,7 @@ class AppSettingsProvider extends ChangeNotifier {
         'messages': messageAlerts,
         'exchanges': exchangeAlerts,
         'announcements': announcementAlerts,
+        'updates': updateAlerts,
       });
     } catch (_) {
       // Local cache still reflects the choice; the next sync will retry.

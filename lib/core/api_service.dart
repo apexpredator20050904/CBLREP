@@ -766,17 +766,41 @@ class ApiService {
       Map<String, dynamic>.from(
           await _request(_dio.put('/notifications/$id/read')) as Map);
 
+  /// PUT /notifications/read-all — mark the whole inbox as read.
+  ///
+  /// Only the unread rows are stamped server-side, so a notification that was
+  /// already read keeps the moment it was read.
+  Future<Map<String, dynamic>> markAllNotificationsRead() async =>
+      Map<String, dynamic>.from(
+          await _request(_dio.put('/notifications/read-all')) as Map);
+
+  /// DELETE /notifications/{id} — remove one notification from the inbox.
+  Future<Map<String, dynamic>> deleteNotification(int id) async =>
+      Map<String, dynamic>.from(
+          await _request(_dio.delete('/notifications/$id')) as Map);
+
+  /// DELETE /notifications — clear the whole inbox.
+  Future<Map<String, dynamic>> deleteAllNotifications() async =>
+      Map<String, dynamic>.from(
+          await _request(_dio.delete('/notifications')) as Map);
+
   // ── Push device tokens (FCM) ─────────────────────────────────────────
   /// POST /device-tokens — associate this device's FCM token with the member so
   /// the backend can push alerts even when the app is closed. The server
   /// upserts on the token, so calling this repeatedly is safe.
+  ///
+  /// [buildNumber] is the versionCode the app is running. The server uses it
+  /// to work out who is behind, so a release announcement only reaches the
+  /// members who actually need it.
   Future<void> registerDeviceToken({
     required String token,
     required String platform,
+    int? buildNumber,
   }) async {
     await _request(_dio.post('/device-tokens', data: {
       'token': token,
       'platform': platform,
+      if (buildNumber != null) 'build_number': buildNumber,
     }));
   }
 

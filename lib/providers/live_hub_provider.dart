@@ -89,6 +89,56 @@ class LiveHubProvider extends ChangeNotifier {
     await refreshAll();
   }
 
+  /// Mark every unread notification as read.
+  ///
+  /// The badge is cleared immediately so the bell does not keep a stale count
+  /// while the request is in flight; the refresh then reconciles the list.
+  Future<void> markAllNotificationsRead() async {
+    unreadCount = 0;
+    notifyListeners();
+    await api.markAllNotificationsRead();
+    await refreshAll();
+  }
+
+  /// Delete one notification.
+  ///
+  /// The row is dropped from the list straight away and put back if the server
+  /// refuses, so a failed delete never leaves a ghost behind.
+  Future<void> deleteNotification(int id) async {
+    final index = notifications.indexWhere((n) => (n as Map)['id'] == id);
+    Map<dynamic, dynamic>? removed;
+
+    if (index >= 0) {
+      removed = Map<dynamic, dynamic>.from(notifications[index] as Map);
+      final wasUnread = removed['read_at'] == null;
+      notifications = List<dynamic>.from(notifications)..removeAt(index);
+      if (wasUnread && unreadCount > 0) unreadCount--;
+      notifyListeners();
+    }
+
+    try {
+      await api.deleteNotification(id);
+    } catch (_) {
+      if (removed != null) {
+        notifications = List<dynamic>.from(notifications)..insert(index, removed);
+        if (removed['read_at'] == null) unreadCount++;
+        notifyListeners();
+      }
+      rethrow;
+    }
+
+    await refreshAll();
+  }
+
+  /// Clear the whole inbox.
+  Future<void> deleteAllNotifications() async {
+    notifications = const [];
+    unreadCount = 0;
+    notifyListeners();
+    await api.deleteAllNotifications();
+    await refreshAll();
+  }
+
   @override
   void dispose() {
     _timer?.cancel();
