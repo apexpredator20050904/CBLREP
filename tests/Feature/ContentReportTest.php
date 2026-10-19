@@ -23,11 +23,20 @@ use Tests\TestCase;
  */
 class ContentReportTest extends TestCase
 {
+    /**
+     * A throwaway member.
+     *
+     * The name carries a unique token because the `users` table has a unique
+     * index on `name` and this suite shares the LIVE development database —
+     * a fixed name would one day collide with a real member who registered
+     * it, and the test would fail for a reason that has nothing to do with
+     * the reporting system.
+     */
     private function member(string $name = 'Reporter'): User
     {
         return User::create([
-            'name' => $name,
-            'email' => strtolower($name).'-'.uniqid().'@example.test',
+            'name' => $name.' '.uniqid(),
+            'email' => strtolower(preg_replace('/[^a-z]+/i', '-', $name)).'-'.uniqid().'@example.test',
             'password' => bcrypt('secret1234'),
             'role' => 'user',
             'barangay' => 'Poblacion',
@@ -50,7 +59,7 @@ class ContentReportTest extends TestCase
 
         if (! $admin) {
             $admin = User::create([
-                'name' => 'Super Admin',
+                'name' => 'Super Admin '.uniqid(),
                 'email' => 'admin@cblrep.ph',
                 'password' => bcrypt('secret1234'),
                 'role' => 'super_admin',
@@ -92,8 +101,23 @@ class ContentReportTest extends TestCase
     // Authentication & validation
     // ------------------------------------------------------------------
 
+    /**
+     * Row count of the reports table BEFORE the test adds anything.
+     *
+     * These tests share the development database, which already holds real
+     * rows (the community portal is live), so every assertion of the form
+     * "there are exactly N reports" has to be expressed relative to that
+     * baseline — an absolute count would be wrong on a populated database
+     * and quietly wrong in the other direction on an empty one.
+     */
+    private function reportBaseline(): int
+    {
+        return Report::count();
+    }
+
     public function test_the_report_endpoint_requires_authentication(): void
     {
+        $baseline = $this->reportBaseline();
         $listing = $this->listing($this->member('Owner'));
 
         $this->postJson('/api/reports', [
@@ -102,11 +126,12 @@ class ContentReportTest extends TestCase
             'reason' => 'scam',
         ])->assertUnauthorized();
 
-        $this->assertSame(0, Report::count(), 'An unauthenticated call must not file a report.');
+        $this->assertSame($baseline, Report::count(), 'An unauthenticated call must not file a report.');
     }
 
     public function test_the_reason_vocabulary_is_closed(): void
     {
+        $baseline = $this->reportBaseline();
         $reporter = $this->member();
         $listing = $this->listing($this->member('Owner'));
 
@@ -116,11 +141,12 @@ class ContentReportTest extends TestCase
             'reason' => 'because_i_said_so',
         ])->assertStatus(422);
 
-        $this->assertSame(0, Report::count());
+        $this->assertSame($baseline, Report::count());
     }
 
     public function test_the_reportable_type_vocabulary_is_closed(): void
     {
+        $baseline = $this->reportBaseline();
         $reporter = $this->member();
         $listing = $this->listing($this->member('Owner'));
 
@@ -130,7 +156,7 @@ class ContentReportTest extends TestCase
             'reason' => 'scam',
         ])->assertStatus(422);
 
-        $this->assertSame(0, Report::count());
+        $this->assertSame($baseline, Report::count());
     }
 
     public function test_a_report_needs_a_target_and_a_reason(): void
@@ -148,6 +174,7 @@ class ContentReportTest extends TestCase
 
     public function test_a_member_can_report_a_listing(): void
     {
+        $baseline = $this->reportBaseline();
         $reporter = $this->member();
         $listing = $this->listing($this->member('Owner'));
 
@@ -165,8 +192,13 @@ class ContentReportTest extends TestCase
             ->assertJsonPath('report.status', 'pending');
 
         // The row really is in the database, with the reporter recorded.
-        $this->assertSame(1, Report::count());
-        $row = Report::first();
+        $this->assertSame($baseline + 1, Report::count());
+        $row = Report::where('reporter_id', $reporter->id)
+            ->where('reportable_type', Report::TARGET_LISTING)
+            ->where('reportable_id', $listing->id)
+            ->latest()
+            ->first();
+        $this->assertNotNull($row, 'The filed report must be stored.');
         $this->assertSame($reporter->id, $row->reporter_id);
         $this->assertSame('listing', $row->reportable_type);
         $this->assertSame($listing->id, $row->reportable_id);
@@ -177,6 +209,7 @@ class ContentReportTest extends TestCase
 
     public function test_a_member_can_report_another_member(): void
     {
+        $baseline = $this->reportBaseline();
         $reporter = $this->member();
         $target = $this->member('Troublemaker');
 
@@ -188,7 +221,7 @@ class ContentReportTest extends TestCase
             ->assertJsonPath('report.reportable_type', 'user')
             ->assertJsonPath('report.reason', 'harassment');
 
-        $this->assertSame(1, Report::count());
+        $this->assertSame($baseline + 1, Report::count());
     }
 
     public function test_the_description_is_optional(): void
@@ -202,11 +235,17 @@ class ContentReportTest extends TestCase
             'reason' => 'other',
         ])->assertCreated();
 
-        $this->assertNull(Report::first()->description);
+        $row = Report::where('reporter_id', $reporter->id)
+            ->where('reportable_id', $listing->id)
+            ->latest()
+            ->first();
+        $this->assertNotNull($row);
+        $this->assertNull($row->description);
     }
 
     public function test_reporting_a_listing_that_no_longer_exists_is_a_404(): void
     {
+        $baseline = $this->reportBaseline();
         $reporter = $this->member();
 
         $this->actingAs($reporter)->postJson('/api/reports', [
@@ -215,11 +254,12 @@ class ContentReportTest extends TestCase
             'reason' => 'scam',
         ])->assertStatus(404);
 
-        $this->assertSame(0, Report::count());
+        $this->assertSame($baseline, Report::count());
     }
 
     public function test_reporting_your_own_listing_is_refused(): void
     {
+        $baseline = $this->reportBaseline();
         $member = $this->member();
         $listing = $this->listing($member);
 
@@ -229,11 +269,12 @@ class ContentReportTest extends TestCase
             'reason' => 'scam',
         ])->assertStatus(422);
 
-        $this->assertSame(0, Report::count());
+        $this->assertSame($baseline, Report::count());
     }
 
     public function test_reporting_yourself_is_refused(): void
     {
+        $baseline = $this->reportBaseline();
         $member = $this->member();
 
         $this->actingAs($member)->postJson('/api/reports', [
@@ -242,11 +283,12 @@ class ContentReportTest extends TestCase
             'reason' => 'harassment',
         ])->assertStatus(422);
 
-        $this->assertSame(0, Report::count());
+        $this->assertSame($baseline, Report::count());
     }
 
     public function test_a_duplicate_pending_report_is_refused(): void
     {
+        $baseline = $this->reportBaseline();
         $reporter = $this->member();
         $listing = $this->listing($this->member('Owner'));
 
@@ -259,7 +301,7 @@ class ContentReportTest extends TestCase
         $this->actingAs($reporter)->postJson('/api/reports', $payload)->assertCreated();
         $this->actingAs($reporter)->postJson('/api/reports', $payload)->assertStatus(409);
 
-        $this->assertSame(1, Report::count(), 'The duplicate must not be recorded.');
+        $this->assertSame($baseline + 1, Report::count(), 'The duplicate must not be recorded.');
     }
 
     public function test_a_member_can_read_their_own_reports(): void
@@ -400,14 +442,18 @@ class ContentReportTest extends TestCase
             'reason' => 'counterfeit',
         ])->assertCreated();
 
+        $report = Report::where('reporter_id', $reporter->id)
+            ->where('reportable_id', $listing->id)
+            ->latest()
+            ->first();
+        $this->assertNotNull($report, 'The filed report must exist.');
+
         $queue = $this->actingAs($admin)->getJson('/api/admin/safety-reports')->assertOk();
         $this->assertGreaterThanOrEqual(1, $queue->json('total'));
         $this->assertNotNull(
-            collect($queue->json('reports'))->firstWhere('reason', 'counterfeit'),
+            collect($queue->json('reports'))->firstWhere('id', $report->id),
             'The filed report must be in the queue.'
         );
-
-        $report = Report::where('reason', 'counterfeit')->latest()->first();
 
         $this->actingAs($admin)->patchJson("/api/admin/safety-reports/{$report->id}", [
             'status' => 'action_taken',
@@ -432,7 +478,11 @@ class ContentReportTest extends TestCase
             'reason' => 'scam',
         ])->assertCreated();
 
-        $report = Report::latest()->first();
+        $report = Report::where('reporter_id', $reporter->id)
+            ->where('reportable_id', $listing->id)
+            ->latest()
+            ->first();
+        $this->assertNotNull($report);
         $report->update(['status' => Report::STATUS_REVIEWED]);
 
         $pending = $this->actingAs($admin)
