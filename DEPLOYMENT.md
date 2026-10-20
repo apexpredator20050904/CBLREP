@@ -6,6 +6,36 @@ This deploys **only the React/Vite admin console** (`frontend/`). The Laravel AP
 
 ---
 
+## 0. Where the console is deployed, and what it talks to
+
+| | |
+| --- | --- |
+| **Console** | `https://cblrep-frontend.vercel.app` (Vercel project `cblrep-frontend`, deployed by the Git integration) |
+| **API it calls** | `https://contest-bunny-unsorted.ngrok-free.dev` — the reserved ngrok subdomain, for now |
+| **Why not `api.cblrep.ph`?** | That host is not serving: it accepts TCP on 80/443 but answers the TLS handshake with an `internal error` alert and returns an empty reply. The console points at the tunnel until the host is back. |
+
+**The console only works while this machine and the ngrok tunnel are running.**
+The tunnel is the API the deployment calls, so the laptop going to sleep takes
+the console down with it. That is the price of deploying before the production
+host is repaired.
+
+**To move it to the production API** (once `api.cblrep.ph` serves again):
+
+1. change the repository variable `VERCEL_API_BASE_URL` to `https://api.cblrep.ph`;
+2. push anything to `main` (or run the *Deploy console* workflow by hand).
+
+The value is inlined into the bundle **at build time**, so a redeploy is what
+makes it take effect. The `api.cblrep.ph` origin is already in the API's
+`allowed_origins`, so no CORS change is needed for that move.
+
+**CORS, once and for all:** Vercel cannot run PHP-FPM, so a console served
+from there calls the API cross-origin and the API must answer the preflight.
+`backend/config/cors.php` carries a `*.vercel.app` pattern for exactly that —
+it covers the production alias and every random preview deployment URL. A
+foreign origin still gets no `Access-Control-Allow-Origin`.
+
+---
+
 ## 1. Configuration (already in the repo)
 
 | File | Purpose |
@@ -27,7 +57,7 @@ Set this in **Vercel → Project → Settings → Environment Variables**:
 
 | Name | Example value | Scope |
 | --- | --- | --- |
-| `VITE_API_BASE_URL` | `https://api.your-domain.com` | Production (and Preview if you want previews talking to the same API) |
+| `VITE_API_BASE_URL` | `https://api.cblrep.ph` | Production (and Preview if you want previews talking to the same API) |
 
 - No trailing slash and **no** `/api` suffix — `src/services/adminApi.js` appends
   `/api` itself.
@@ -38,6 +68,10 @@ Set this in **Vercel → Project → Settings → Environment Variables**:
 
 Without `VITE_API_BASE_URL` the app falls back to same-origin `/api/*` and logs
 a console warning; pages load but all data requests fail.
+
+> On Vercel the value **must** be absolute. Vercel serves only static files —
+> there is no PHP-FPM to route a relative `/api/*` to, so an empty value means
+> every request 404s against the Vercel origin.
 
 ---
 
@@ -84,6 +118,38 @@ echo -n "https://api.your-domain.com" | npx --yes vercel@latest env add VITE_API
 
 Tip: `npm run deploy` shells out to the Vercel CLI, so `--prod` works when
 forwarded through npm.
+
+### 4.1 The projects on this repository
+
+The repository is connected to a Vercel team (`team-jesus7`) with **two**
+projects, both deployed by the Git integration on every push:
+
+| Project | Serves | State |
+| --- | --- | --- |
+| `cblrep-frontend` | The admin console | The deployment to fix — see below. |
+| `cblrep` | The repository root | The root is the monorepo (`backend/`, `frontend/`, `mobile/`) and holds no app of its own, so this project has nothing to build. It can be left alone or removed from the team. |
+
+**`cblrep-frontend` needs three settings**, and the first two are what make
+its deployment fail:
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| **Root Directory** | `frontend` | The console is `frontend/`. A root directory left over from when the repository root *was* the Vite app points at `frontend/frontend/`, and the build fails. |
+| **Build Command** | `npm run build` | The default for the Vite preset. |
+| **Output Directory** | `dist` | The default for the Vite preset. |
+| **Env var** | `VITE_API_BASE_URL` = the API origin | Inlined at build time; see §2. |
+
+The repository's own `vercel.json` already declares `rootDirectory: frontend`,
+the SPA rewrite and the cache headers, so the project only has to point at
+the right directory.
+
+**Reading a failed deployment's logs** needs a Vercel token:
+
+```bash
+npx vercel inspect <deployment-id> --logs --token $VERCEL_TOKEN
+```
+
+The failure message on the pull request names the deployment id.
 
 ---
 
