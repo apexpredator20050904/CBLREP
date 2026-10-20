@@ -112,7 +112,15 @@ cd mobile
 | [`docs/CI_CD.md`](docs/CI_CD.md) | The CI/CD runbook: the gate, the workflows, the secrets, cutting a release |
 | [`backend/deploy/DEPLOY_DEBIAN.md`](backend/deploy/DEPLOY_DEBIAN.md) | Deploying the API to a Linux server (nginx + PHP-FPM + MariaDB) |
 | [`mobile/BUILD.md`](mobile/BUILD.md) | Release-APK signing and the compiled-in API URL |
-| [`docs/REFACTOR_BARTER_ONLY.md`](docs/REFACTOR_BARTER_ONLY.md) | Why the portal is direct bartering only |
+
+## Background
+
+The portal is **direct bartering only** — no freecycling, no temporary
+lending. The decision and the reasoning behind it are recorded in
+[`docs/REFACTOR_BARTER_ONLY.md`](docs/REFACTOR_BARTER_ONLY.md): a barter is
+inherently two-sided, so the schema carries `offered_resource_id` and
+`offered_item`, which makes *"give an item away for free"* structurally
+impossible rather than merely hidden behind a dropdown.
 
 ## CI and releases
 
