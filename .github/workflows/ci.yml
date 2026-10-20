@@ -123,6 +123,16 @@ jobs:
           extensions: pdo_mysql, mbstring, openssl, tokenizer, xml, curl, fileinfo, gd, bcmath, intl, zip
           coverage: none
 
+      - name: Prepare the Laravel directories
+        # bootstrap/cache and storage/ are git-ignored, so a fresh checkout
+        # has neither, and Composer's package:discover step needs the cache
+        # directory to exist and be writable.
+        run: |
+          mkdir -p bootstrap/cache \
+                   storage/framework/cache storage/framework/sessions \
+                   storage/framework/views storage/logs storage/app/public
+          chmod -R 777 bootstrap/cache storage
+
       - name: Cache the Composer packages
         uses: actions/cache@v4
         with:
