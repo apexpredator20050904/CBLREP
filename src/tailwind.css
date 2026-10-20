@@ -16,6 +16,12 @@ html.dark .bg-\[\#f8fafc\] {
   color: #e5f3e8;
 }
 
+/* Pinned top strip must match the scrolling surface, or a seam shows
+   between the fixed chrome and the content below it. */
+html.dark .app-chrome {
+  background: #102719;
+}
+
 html.dark .bg-white {
   background: #17351f;
   border-color: #2e5a39;

@@ -21,7 +21,7 @@ export default function Header({ title }) {
   const name = user?.fullName || user?.name || "Administrator";
 
   return (
-    <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
+    <header className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex items-center gap-2 text-sm">
         <span className="font-bold text-emerald-800">{title || "Admin"}</span>
         <span className="text-stone-300">•</span>

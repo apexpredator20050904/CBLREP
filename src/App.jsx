@@ -38,6 +38,7 @@ import InquiriesPage from "./pages/InquiriesPage";
 import ExchangesPage from "./pages/ExchangesPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import ContentPage from "./pages/ContentPage";
+import PublicPage from "./pages/PublicPage";
 import ReportsPage from "./pages/ReportsPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
 import AuditLogsPage from "./pages/AuditLogsPage";
@@ -58,8 +59,9 @@ export default function App() {
       <AuthProvider>
         <ThemePreference />
         <Routes>
-          {/* Sole public screen — admin sign-in */}
+          {/* Public screens — no auth required (admin sign-in + content pages) */}
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/page/:slug" element={<PublicPage />} />
 
           {/* Protected admin console (RBAC-guarded, error-isolated per tab) */}
           <Route element={<RequireAdmin />}>
