@@ -32,9 +32,19 @@ export const clearStoredSession = () => {
 };
 
 // Shared axios client — import this (not raw axios) in every module.
+//
+// The `ngrok-skip-browser-warning` header matters because the console runs in
+// a BROWSER and ngrok's free tier answers a browser GET with its "you are
+// about to visit…" warning page instead of the API's JSON. That broke the
+// session check (the app read HTML, could not parse it, and signed the
+// administrator straight back out) and every listing read. The header tells
+// ngrok to pass the request through. A normal API ignores it.
 export const api = axios.create({
   baseURL: API_BASE_URL ? `${API_BASE_URL}/api` : "/api",
-  headers: { Accept: "application/json" },
+  headers: {
+    Accept: "application/json",
+    "ngrok-skip-browser-warning": "true",
+  },
   timeout: 20000,
 });
 
