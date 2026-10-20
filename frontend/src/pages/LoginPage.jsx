@@ -7,7 +7,7 @@
 // ─────────────────────────────────────────────────────────────
 import { useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import logo from "../assets/logo.jpg";
+import logo from "../assets/logo.png";
 import AdminLoginEnrolment from "../components/AdminLoginEnrolment";
 import AdminTwoFactorModal from "../components/AdminTwoFactorModal";
 import { useAuth } from "../context/AuthContext";
@@ -90,7 +90,7 @@ export default function LoginPage() {
       {/* Brand panel */}
       <div className="hidden w-2/5 flex-col justify-between bg-emerald-900 p-10 text-white lg:flex">
         <div className="flex items-center gap-3">
-          <img src={logo} alt="CBLREP logo" className="h-12 w-12 rounded-full object-cover" />
+          <img src={logo} alt="CBLREP logo" className="h-12 w-12 object-contain" />
           <div>
             <p className="font-extrabold tracking-wide">CBLREP · ADMIN CONSOLE</p>
             <p className="text-sm text-emerald-200/70">Trinidad, Bohol</p>

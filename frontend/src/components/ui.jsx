@@ -72,7 +72,7 @@ const COMPENSATION_FALLBACK = "bg-stone-100 text-stone-700 ring-stone-200";
  * pre-computed label. When `price` is supplied on a paid listing it is shown
  * as `PAID · ₱350`, mirroring the mobile app.
  */
-export function CompensationBadge({ type, label, price }) {
+export function CompensationBadge({ type, label, price, budget = false }) {
   const key = String(type || "").toLowerCase();
   const text =
     label ||
@@ -80,14 +80,17 @@ export function CompensationBadge({ type, label, price }) {
     "BARTER";
   const showPrice =
     key === "paid" && price !== null && price !== undefined && price !== "";
+  // On a NEED the figure is the poster's ceiling ("I can pay up to ₱300"),
+  // not an asking price, so the badge must not read as one.
+  const caption = budget && key === "paid" ? "BUDGET" : text;
   return (
     <span
       className={`inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-1 text-[10px] font-bold ring-1 ${
         COMPENSATION_STYLES[key] || COMPENSATION_FALLBACK
       }`}
     >
-      {text}
-      {showPrice ? ` · ₱${Number(price).toLocaleString()}` : ""}
+      {caption}
+      {showPrice ? ` · ${budget ? "up to " : ""}₱${Number(price).toLocaleString()}` : ""}
     </span>
   );
 }
