@@ -89,13 +89,17 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
   Future<void> confirmCompletion(Map<String, dynamic> item) async {
     final id = (item['id'] as num?)?.toInt() ?? 0;
     final label = '${item['item'] ?? item['title'] ?? 'this exchange'}';
+    final isFulfilment = item['kind'] == 'fulfilment';
 
     final confirmed = await Feedback.confirm(
       context,
-      title: 'Confirm Trade Completed?',
-      message: 'Confirm that the handover for "$label" really took place. '
-          'The trade only completes once BOTH members confirm.',
-      confirmLabel: 'Confirm Completed',
+      title: isFulfilment ? 'Confirm Handover?' : 'Confirm Trade Completed?',
+      message: isFulfilment
+          ? 'Confirm that you handed over "$label". '
+              'It only counts once BOTH neighbours confirm.'
+          : 'Confirm that the handover for "$label" really took place. '
+              'The trade only completes once BOTH members confirm.',
+      confirmLabel: isFulfilment ? 'Confirm Handover' : 'Confirm Completed',
     );
     if (!confirmed || !mounted) return;
 
@@ -167,6 +171,13 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
                     final proposerOk = item['proposer_confirmed'] == true;
                     final ownerOk = item['owner_confirmed'] == true;
                     final iConfirmed = item['i_confirmed'] == true;
+                    // A FULFILMENT answers a NEED ("I have what you want"):
+                    // the proposer is the supplier and the listing owner is
+                    // the requester. The state machine is the same, the words
+                    // are not.
+                    final isFulfilment = item['kind'] == 'fulfilment';
+                    final proposerLabel = isFulfilment ? 'Supplier' : 'Proposer';
+                    final ownerLabel = isFulfilment ? 'Requester' : 'Owner';
                     // Fallback keeps the button visible for older payloads
                     // that lack can_confirm_completion.
                     final canConfirm =
@@ -194,12 +205,17 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
                       decoration: BoxDecoration(color: dark ? CblrepColors.darkCardGreen : Colors.white, borderRadius: BorderRadius.circular(12)),
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                         Row(children: [
-                          Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: CblrepColors.actionOrange, borderRadius: BorderRadius.circular(12)), child: Text('${item['type'] ?? 'Exchange'}'.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold))),
+                          Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: CblrepColors.actionOrange, borderRadius: BorderRadius.circular(12)), child: Text(isFulfilment ? 'SUPPLYING' : '${item['type'] ?? 'Exchange'}'.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold))),
                           const SizedBox(width: 6),
                           Expanded(child: Text('${item['item'] ?? item['title'] ?? 'Exchange'}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: dark ? Colors.white : Colors.black), overflow: TextOverflow.ellipsis)),
                         ]),
                         const SizedBox(height: 2),
-                        Text('Giving: ${item['offered'] ?? '—'}', style: TextStyle(fontSize: 10, color: dark ? Colors.white70 : Colors.black54)),
+                        Text(
+                           isFulfilment
+                               ? 'They need: ${item['item'] ?? '—'}  ·  In return: ${item['offered'] ?? '—'}'
+                               : 'Giving: ${item['offered'] ?? '—'}',
+                           style: TextStyle(fontSize: 10, color: dark ? Colors.white70 : Colors.black54),
+                         ),
                         if ((item['barangay'] ?? '').toString().isNotEmpty) ...[
                           const SizedBox(height: 2),
                           Text('${item['barangay']}${(item['purok_sitio'] ?? '').toString().isNotEmpty ? ' · ${item['purok_sitio']}' : ''}', style: TextStyle(fontSize: 10, color: dark ? Colors.white54 : Colors.black45)),
@@ -222,11 +238,11 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
                               Row(children: [
                                 Icon(proposerOk ? Icons.check_circle : Icons.radio_button_unchecked, size: 12, color: proposerOk ? Colors.green : Colors.grey),
                                 const SizedBox(width: 4),
-                                Text('Proposer ${proposerOk ? '✓' : '·'}', style: TextStyle(fontSize: 10, color: dark ? Colors.white70 : Colors.black54)),
+                                Text('$proposerLabel ${proposerOk ? '✓' : '·'}', style: TextStyle(fontSize: 10, color: dark ? Colors.white70 : Colors.black54)),
                                 const SizedBox(width: 10),
                                 Icon(ownerOk ? Icons.check_circle : Icons.radio_button_unchecked, size: 12, color: ownerOk ? Colors.green : Colors.grey),
                                 const SizedBox(width: 4),
-                                Text('Owner ${ownerOk ? '✓' : '·'}', style: TextStyle(fontSize: 10, color: dark ? Colors.white70 : Colors.black54)),
+                                Text('$ownerLabel ${ownerOk ? '✓' : '·'}', style: TextStyle(fontSize: 10, color: dark ? Colors.white70 : Colors.black54)),
                               ]),
                             ]),
                           ),
@@ -249,13 +265,13 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
                             ])
                           else
                             Row(children: [
-                              Expanded(child: Text('Waiting for owner response…', style: TextStyle(fontSize: 10, color: dark ? Colors.white70 : Colors.black54))),
+                              Expanded(child: Text(isFulfilment ? 'Waiting for the poster to respond…' : 'Waiting for owner response…', style: TextStyle(fontSize: 10, color: dark ? Colors.white70 : Colors.black54))),
                               if (canCancel || role == 'proposer')
                                 SizedBox(height: 32, child: OutlinedButton(onPressed: () => update(item, 'cancelled'), child: Text('Cancel', style: TextStyle(fontSize: 10)))),
                             ]),
                         ] else if (isAccepted) ...[
                           if (canConfirm)
-                            SizedBox(width: double.infinity, height: 36, child: ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: CblrepColors.brandGreen, foregroundColor: Colors.white), onPressed: () => confirmCompletion(item), child: Text('Confirm Trade Completed', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)))),
+                            SizedBox(width: double.infinity, height: 36, child: ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: CblrepColors.brandGreen, foregroundColor: Colors.white), onPressed: () => confirmCompletion(item), child: Text(isFulfilment ? 'Confirm Handover' : 'Confirm Trade Completed', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)))),
                           if (iConfirmed)
                             Row(children: [
                               Icon(Icons.check_circle, size: 14, color: Colors.green),

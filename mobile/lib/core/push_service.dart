@@ -6,6 +6,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import 'api_service.dart';
 
@@ -23,6 +24,14 @@ const String kCblrepChannelExchanges = 'cblrep_exchanges';
 const String kCblrepChannelAnnouncements = 'cblrep_announcements';
 const String kCblrepChannelAccount = 'cblrep_account';
 
+/// Channel for "a new version of the app is available".
+///
+/// Its own channel so a member can silence release pings at the OS level
+/// without also muting barangay announcements. An older build that does not
+/// know this channel falls back to the manifest's default channel, so the
+/// notice still reaches the members who need it most.
+const String kCblrepChannelUpdates = 'cblrep_updates';
+
 /// Backwards-compatible aliases for the original single channel.
 const String kCblrepNotificationChannelId = kCblrepChannelMessages;
 const String kCblrepNotificationChannelName = 'CBLREP updates';
@@ -33,6 +42,7 @@ const Map<String, String> _channelNames = {
   kCblrepChannelExchanges: 'Barter activity',
   kCblrepChannelAnnouncements: 'Announcements',
   kCblrepChannelAccount: 'Account & verification',
+  kCblrepChannelUpdates: 'App updates',
 };
 
 const Map<String, String> _channelDescriptions = {
@@ -40,7 +50,25 @@ const Map<String, String> _channelDescriptions = {
   kCblrepChannelExchanges: 'Barter requests, approvals and completions.',
   kCblrepChannelAnnouncements: 'Barangay and municipal announcements.',
   kCblrepChannelAccount: 'Verification decisions and listing moderation.',
+  kCblrepChannelUpdates: 'New builds of the app and what changed.',
 };
+
+/// A notification the member tapped.
+///
+/// The widget layer decides what to do with it — the service has no
+/// navigation of its own.
+class PushAction {
+  /// The backend's `type` value, e.g. `app_update`, `message`, `exchange_request`.
+  final String type;
+
+  /// The structured payload the backend sent alongside the notification.
+  final Map<String, dynamic> data;
+
+  const PushAction(this.type, this.data);
+
+  /// True when the tap was on a "there is a new build" notice.
+  bool get isAppUpdate => type == 'app_update';
+}
 
 /// Maps a backend `channel` value onto a channel this device actually created,
 /// falling back to the messages channel so a push is never dropped just because
@@ -86,6 +114,27 @@ class PushService {
   String? _token;
   StreamSubscription<String>? _tokenRefresh;
 
+  final StreamController<PushAction> _actions =
+      StreamController<PushAction>.broadcast();
+
+  /// A tap that arrived before anything was listening (a cold start from the
+  /// notification). It is replayed to the first listener.
+  PushAction? _pendingAction;
+
+  /// Taps on notifications, for the widget layer to act on.
+  ///
+  /// A tap that arrives while nobody is listening — the app was closed and is
+  /// now starting from the notification — is held and handed to the first
+  /// listener instead of being lost.
+  Stream<PushAction> get actions async* {
+    final pending = _pendingAction;
+    if (pending != null) {
+      _pendingAction = null;
+      yield pending;
+    }
+    yield* _actions.stream;
+  }
+
   /// Wires up FCM and local notifications once, at app launch.
   ///
   /// Requests the notification permission (Android 13+), creates the
@@ -126,6 +175,12 @@ class PushService {
         _token = token;
         unawaited(_register(token));
       });
+
+      // A cold start from a notification: the app was closed and the member
+      // tapped the notification, so the message never reaches
+      // onMessageOpenedApp. Without this the tap is silently lost.
+      final initial = await FirebaseMessaging.instance.getInitialMessage();
+      if (initial != null) _handleNotificationTap(initial);
     } catch (e) {
       debugPrint('[CBLREP] FCM listeners failed: $e');
     }
@@ -168,11 +223,27 @@ class PushService {
     final api = _api;
     if (api == null) return;
     try {
-      await api.registerDeviceToken(token: token, platform: _platform);
+      await api.registerDeviceToken(
+        token: token,
+        platform: _platform,
+        // The build this device runs, so the server can tell who is behind
+        // when a new release is announced.
+        buildNumber: await _buildNumber(),
+      );
     } catch (e) {
       // A backend without the /device-tokens route (older deploy) answers 404;
       // that must not surface to the member.
       debugPrint('[CBLREP] device token registration failed: $e');
+    }
+  }
+
+  /// The versionCode of the running build, or null when it cannot be read.
+  Future<int?> _buildNumber() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      return int.tryParse(info.buildNumber);
+    } catch (_) {
+      return null;
     }
   }
 
@@ -244,10 +315,20 @@ class PushService {
 
   void _handleNotificationTap(RemoteMessage message) {
     // The shell already refreshes notifications on resume/foreground; the
-    // payload now carries `type` + the relevant ids so a future release can
+    // payload now carries `type` + the relevant ids so the widget layer can
     // deep-link into the exact thread/listing.
-    final type = message.data['type']?.toString();
+    final type = message.data['type']?.toString() ?? 'general';
     debugPrint('[CBLREP] notification opened (type=$type): ${message.data}');
+
+    final action = PushAction(type, Map<String, dynamic>.from(message.data));
+
+    if (_actions.hasListener) {
+      _actions.add(action);
+    } else {
+      // Nothing is listening yet (the app is starting from this tap), so the
+      // action waits for the first listener instead of being dropped.
+      _pendingAction = action;
+    }
   }
 
   String get _platform => Platform.isAndroid ? 'android' : 'ios';
@@ -255,5 +336,6 @@ class PushService {
   Future<void> dispose() async {
     await _tokenRefresh?.cancel();
     _tokenRefresh = null;
+    await _actions.close();
   }
 }

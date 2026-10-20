@@ -78,6 +78,13 @@ class SettingsScreen extends StatelessWidget {
               activeColor: CblrepColors.actionOrange,
               onChanged: settings.notificationsEnabled ? (v) => settings.setAnnouncementAlerts(v) : null,
             ),
+            SwitchListTile(
+              title: const Text('App updates'),
+              subtitle: const Text('Alerts when a new version of CBLREP is released'),
+              value: settings.updateAlerts,
+              activeColor: CblrepColors.actionOrange,
+              onChanged: settings.notificationsEnabled ? (v) => settings.setUpdateAlerts(v) : null,
+            ),
           ]),
           _section(context, 'Account', [
             ListTile(

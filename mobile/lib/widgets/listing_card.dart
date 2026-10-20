@@ -4,27 +4,54 @@ import '../theme/cblrep_theme.dart';
 import 'user_avatar.dart';
 import 'verified_badge.dart';
 
-/// Reusable resource card for the home feed, profile and map previews.
+/// Reusable resource card for the home feed.
 ///
-/// Layout contract — the card is given an exact box by the parent (a
-/// [SliverGrid] cell or a list tile), so every part sizes itself defensively:
+/// Layout contract — the card sizes itself from its content (a fixed-height
+/// photo plus a natural-height body), so it can be dropped into a list or a
+/// grid without the parent having to compute a ratio:
 ///
-///  * The photo area is [Flexible], not a fixed 140px. It absorbs whatever
-///    height the body does not claim, which is what keeps the card free of
-///    `RenderFlex overflowed` stripes on narrow Galaxy devices where a fixed
-///    image height left less room for the text than the text needed.
+///  * The photo has a FIXED height rather than a flexible one. A flexible
+///    photo only works when the parent hands the card an exact box; a
+///    content-sized card cannot. A fixed height also means every card in the
+///    feed shows the same amount of the item, which is what makes a
+///    marketplace feed scannable.
 ///  * Every text run lives inside an [Expanded]/[Flexible] with
-///    [TextOverflow.ellipsis], so a long author name or purok tag truncates
+///    [TextOverflow.ellipsis], so a long owner name or purok tag truncates
 ///    cleanly instead of colliding with the element beside it.
-///  * Hyper-local tag and author sit on their own lines rather than sharing a
-///    row, which removes the collision entirely and gives a clearer hierarchy:
-///    title → category · condition → location chip → author.
+///  * The action row is built from [Expanded] buttons, so the two fast
+///    actions always share the available width evenly — down to a 320dp
+///    phone — instead of overflowing.
 class ListingCard extends StatelessWidget {
   final ListingModel listing;
   final VoidCallback? onTap;
-  final VoidCallback? onManage;
 
-  const ListingCard({super.key, required this.listing, this.onTap, this.onManage});
+  /// The "View Details" action.
+  final VoidCallback? onViewDetails;
+
+  /// The secondary action: propose a barter, claim a gift, or make an offer.
+  final VoidCallback? onPropose;
+
+  /// The three-dot menu. When null the menu button is not rendered at all —
+  /// a card with an empty menu is worse than no menu.
+  final VoidCallback? onReport;
+
+  /// Opens the owner's profile. When null the owner row is not tappable.
+  final VoidCallback? onOwnerTap;
+
+  /// How far away the listing is ("≈1.2 km away"), shown when the feed is
+  /// sorted by proximity.
+  final String? distanceLabel;
+
+  const ListingCard({
+    super.key,
+    required this.listing,
+    this.onTap,
+    this.onViewDetails,
+    this.onPropose,
+    this.onReport,
+    this.onOwnerTap,
+    this.distanceLabel,
+  });
 
   bool get isNeed => listing.type == 'request';
 
@@ -33,12 +60,16 @@ class ListingCard extends StatelessWidget {
   static Color compensationColor(String type) => CblrepColors.compensationColor(type);
 
   /// "PAID · ₱250" style caption, or the bare label for free/barter.
+  ///
+  /// On a NEED the price is the poster's budget ceiling, so the caption says
+  /// "BUDGET" rather than "PAID" — the two are not the same promise.
   String get compensationCaption {
     if (listing.isPaid && listing.price != null) {
       final whole = listing.price == listing.price!.roundToDouble();
       final formatted =
           whole ? listing.price!.toStringAsFixed(0) : listing.price!.toStringAsFixed(2);
-      return '${listing.compensationLabel} · ₱$formatted';
+      final label = listing.isBudget ? 'BUDGET' : listing.compensationLabel;
+      return '$label · ₱$formatted';
     }
     return listing.compensationLabel;
   }
@@ -51,6 +82,48 @@ class ListingCard extends StatelessWidget {
     if (parts.isNotEmpty) return parts.join(' · ');
     return listing.location.isEmpty ? 'Trinidad, Bohol' : listing.location;
   }
+
+  /// A short, uniform condition badge.
+  ///
+  /// The backend stores whatever the member typed ("Good condition, minor
+  /// scratches"), but a badge has to be short enough to sit over a photo, so
+  /// the common words are mapped onto the three labels a buyer actually
+  /// scans for. Anything unrecognised falls back to the member's own words.
+  ///
+  /// On a NEED the condition is what the poster is willing to ACCEPT, so the
+  /// badge reads "Any / Like new / Working" rather than the item's state.
+  String get _conditionBadge {
+    final raw = listing.condition.trim();
+    if (listing.conditionIsRequirement) {
+      if (raw.isEmpty) return 'Any';
+      return raw.length > 18 ? '${raw.substring(0, 17)}…' : raw;
+    }
+    final lower = raw.toLowerCase();
+    if (lower.contains('like new') || lower == 'new') return 'Like New';
+    if (lower.contains('fair') || lower.contains('poor')) return 'Fair';
+    if (lower.contains('good')) return 'Good';
+    if (raw.isEmpty) return 'Good';
+    return raw.length > 18 ? '${raw.substring(0, 17)}…' : raw;
+  }
+
+  /// The label of the secondary action, matched to how the owner shares.
+  ///
+  /// The direction matters as much as the compensation: on a NEED the
+  /// neighbour is the SUPPLIER, so the action is "I have this" (or "I can
+  /// supply it" when the poster is paying) — never the offer-side wording of
+  /// an OFFER.
+  String get _proposeLabel => switch (listing.compensationType) {
+        'free' => 'Claim Item',
+        'paid' => isNeed ? 'I Can Supply' : 'Make Offer',
+        _ => isNeed ? 'I Have This' : 'Propose Barter',
+      };
+
+  /// The icon of the secondary action, matched to how the owner shares.
+  IconData get _proposeIcon => switch (listing.compensationType) {
+        'free' => Icons.redeem_outlined,
+        'paid' => Icons.local_offer_outlined,
+        _ => isNeed ? Icons.inventory_2_outlined : Icons.swap_horiz,
+      };
 
   /// Centered watermark shown while a listing has no usable photo.
   Widget _placeholder(bool need) => Center(
@@ -75,12 +148,11 @@ class ListingCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Photo: flexible rather than fixed height. `flex: 5` against the
-            // body's `flex: 0` keeps the image as tall as the space allows
-            // while the text keeps its intrinsic height — no overflow, and no
-            // wasted space on short cards.
-            Flexible(
-              flex: 5,
+            // ── Photo ──────────────────────────────────────────────────
+            // A fixed height keeps every card in the feed the same shape, so
+            // the eye can run down the column without re-reading each one.
+            SizedBox(
+              height: 168,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
@@ -101,11 +173,28 @@ class ListingCard extends StatelessWidget {
                       fit: BoxFit.cover,
                       // Decode at card resolution instead of full camera size —
                       // a big scroll-smoothness win on 2-core devices.
-                      cacheWidth: 480,
+                      cacheWidth: 640,
                       errorBuilder: (_, _, _) => _placeholder(isNeed),
                     )
                   else
                     _placeholder(isNeed),
+                  // A soft scrim under the bottom row of badges so white text
+                  // stays readable on a bright photo.
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    height: 52,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Colors.transparent, Colors.black.withValues(alpha: 0.55)],
+                        ),
+                      ),
+                    ),
+                  ),
                   Positioned(
                     top: 8,
                     left: 8,
@@ -122,65 +211,54 @@ class ListingCard extends StatelessWidget {
                       color: compensationColor(listing.compensationType),
                     ),
                   ),
+                  // The item's condition, bottom-left over the scrim.
+                  Positioned(
+                    left: 8,
+                    bottom: 8,
+                    child: _ConditionTag(label: _conditionBadge),
+                  ),
                 ],
               ),
             ),
+            // ── Body ───────────────────────────────────────────────────
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Title row also hosts the optional manage affordance, so
-                  // the card needs one fewer line than before.
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          listing.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 13,
-                            height: 1.25,
-                            color: strong,
-                          ),
-                        ),
-                      ),
-                      if (onManage != null) ...[
-                        const SizedBox(width: 4),
-                        InkWell(
-                          onTap: onManage,
-                          borderRadius: BorderRadius.circular(20),
-                          child: Padding(
-                            padding: const EdgeInsets.all(4),
-                            child: Icon(Icons.more_vert, size: 16, color: muted),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 4),
                   Text(
-                    '${listing.category} · ${listing.condition}',
-                    maxLines: 1,
+                    listing.title,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 10, color: muted),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                      height: 1.25,
+                      color: strong,
+                    ),
                   ),
-                  const SizedBox(height: 8),
-                  // Hyper-local tag on its own line. The chip sizes to the
-                  // card width and its text ellipsizes, so
-                  // "Barangay Poblacion · Purok 3" degrades to "Barangay
-                  // Poblaci…" rather than running past the card edge.
+                  const SizedBox(height: 6),
+                  // Hyper-local tag. The chip sizes to the card width and its
+                  // text ellipsizes, so "Barangay Poblacion · Purok 3"
+                  // degrades to "Barangay Poblaci…" rather than running past
+                  // the card edge.
                   LocationChip(
                     label: _locationTag,
                     dark: dark,
                   ),
-                  const SizedBox(height: 6),
-                  // Author on its own line: a small photo (or initials) plus
+                  // The owner's wishlist — the return side of a barter. It is
+                  // the single most useful thing on the card for a member
+                  // scanning for a trade, so it gets its own line.
+                  if (listing.hasWantedItem) ...[
+                    const SizedBox(height: 6),
+                    _WantedTag(item: listing.wantedItem!, isOffer: listing.wantedIsOffer),
+                  ],
+                  const SizedBox(height: 8),
+                  // Owner on their own line: a small photo (or initials) plus
                   // the name, with a verified tick when the owner's residency
-                  // is confirmed.
+                  // is confirmed, and the distance when the feed is sorted by
+                  // proximity. Tapping the owner opens their profile.
                   Row(
                     children: [
                       UserAvatar(
@@ -192,14 +270,21 @@ class ListingCard extends StatelessWidget {
                       Expanded(
                         child: Row(children: [
                           Flexible(
-                            child: Text(
-                              listing.owner,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                color: muted,
+                            child: InkWell(
+                              onTap: onOwnerTap,
+                              borderRadius: BorderRadius.circular(4),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 2),
+                                child: Text(
+                                  listing.owner,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: muted,
+                                  ),
+                                ),
                               ),
                             ),
                           ),
@@ -209,6 +294,90 @@ class ListingCard extends StatelessWidget {
                           ],
                         ]),
                       ),
+                      if (distanceLabel != null) ...[
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            distanceLabel!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.right,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: muted,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  // ── Fast actions ─────────────────────────────────────
+                  // The two actions a member reaches for, side by side, plus
+                  // the report menu. Expanded buttons so the row fits any
+                  // phone width; the ⋮ stays a fixed-size target.
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SizedBox(
+                          height: 38,
+                          child: OutlinedButton.icon(
+                            onPressed: onViewDetails ?? onTap,
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 6),
+                              foregroundColor: strong,
+                              side: BorderSide(
+                                color: dark ? Colors.white24 : Colors.black26,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                            icon: const Icon(Icons.visibility_outlined, size: 16),
+                            // The button already lays its label out in a
+                            // Flexible, so the label is a plain Text that
+                            // ellipsizes rather than a second Flexible (which
+                            // would be two competing parent-data widgets).
+                            label: const Text(
+                              'View Details',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: SizedBox(
+                          height: 38,
+                          child: FilledButton.icon(
+                            onPressed: onPropose,
+                            style: FilledButton.styleFrom(
+                              backgroundColor: CblrepColors.actionOrange,
+                              padding: const EdgeInsets.symmetric(horizontal: 6),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                            icon: Icon(_proposeIcon, size: 16),
+                            label: Text(
+                              _proposeLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (onReport != null) ...[
+                        const SizedBox(width: 4),
+                        _ReportMenu(onReport: onReport!),
+                      ],
                     ],
                   ),
                 ],
@@ -217,6 +386,130 @@ class ListingCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// The condition badge overlaid on the listing photo.
+class _ConditionTag extends StatelessWidget {
+  final String label;
+  const _ConditionTag({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.auto_awesome, size: 10, color: Colors.white),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// "WANTED FOR BARTER: 5 kg of rice" — the owner's return wish.
+class _WantedTag extends StatelessWidget {
+  final String item;
+
+  /// True when the listing is a NEED, where this text is what the poster can
+  /// offer in return rather than what they want.
+  final bool isOffer;
+  const _WantedTag({required this.item, this.isOffer = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final color = CblrepColors.compBarter;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: dark ? 0.16 : 0.10),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.swap_horiz, size: 13, color: color),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: isOffer ? 'CAN OFFER IN RETURN: ' : 'WANTED FOR BARTER: ',
+                    style: TextStyle(
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.3,
+                      color: color,
+                    ),
+                  ),
+                  TextSpan(
+                    text: item,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: dark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                ],
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The subtle three-dot menu that carries the report action.
+class _ReportMenu extends StatelessWidget {
+  final VoidCallback onReport;
+  const _ReportMenu({required this.onReport});
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return PopupMenuButton<String>(
+      tooltip: 'More actions',
+      padding: EdgeInsets.zero,
+      icon: Icon(Icons.more_vert, size: 18, color: dark ? Colors.white60 : Colors.black45),
+      onSelected: (value) {
+        if (value == 'report') onReport();
+      },
+      itemBuilder: (context) => const [
+        PopupMenuItem(
+          value: 'report',
+          child: Row(
+            children: [
+              Icon(Icons.report_gmailerrorred_outlined, size: 18, color: CblrepColors.dangerRed),
+              SizedBox(width: 10),
+              Text('Report posting', style: TextStyle(fontSize: 13)),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

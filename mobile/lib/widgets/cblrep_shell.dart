@@ -136,7 +136,7 @@ class _CblrepShellState extends State<CblrepShell> {
                 await Navigator.push(context, MaterialPageRoute(builder: (_) => const CreateListingScreen()));
               },
               icon: const Icon(Icons.add),
-              label: const Text('+ Post a Resource', style: TextStyle(fontWeight: FontWeight.bold)),
+              label: const Text('Post a Resource', style: TextStyle(fontWeight: FontWeight.bold)),
             )
           : null,
       bottomNavigationBar: NavigationBar(
