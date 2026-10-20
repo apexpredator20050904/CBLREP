@@ -22,7 +22,7 @@
     "react-router-dom": "^7.18.4"
   },
   "devDependencies": {
-    "@babel/core": "^7.29.7",
+    "@babel/core": "^8.0.7",
     "@eslint/js": "^10.0.1",
     "@rolldown/binding-linux-x64-gnu": "^1.2.9",
     "@rolldown/plugin-babel": "^0.2.3",
