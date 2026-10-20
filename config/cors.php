@@ -56,7 +56,7 @@ return [
         '#^https://[a-z0-9-]+\.ngrok\.app$#',
         '#^https://[a-z0-9-]+\.ngrok\.io$#',
         // The admin console served from Vercel. The pattern covers the
-        // project's production alias (cblrep-admin.vercel.app) AND every
+        // project's production alias (cblrep-frontend.vercel.app) AND every
         // random preview deployment URL Vercel hands out per deployment, so
         // a preview does not need this file edited for it.
         //
