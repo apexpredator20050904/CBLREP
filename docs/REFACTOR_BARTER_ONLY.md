@@ -2,6 +2,28 @@
 
 ## Removing Freecycling & Temporary Lending → Direct Bartering Only
 
+> ### ⚠️ This refactor has already been applied
+>
+> The migrations it calls for — `2026_09_29_000002` (narrow the exchanges
+> table to bartering) and `2026_10_13_000001` (collapse the barter proposals
+> into it) — have both **run**. The lending row §1.1 tells you to back up
+> the database and delete is long gone, along with its
+> `scheduled_return_date` column. **Do not re-run the steps below**: they are
+> a line-referenced record of *how* the change was made, kept for the
+> reasoning rather than the procedure.
+>
+> **What is still worth reading here:**
+>
+> - **§0** — the decision that matters. A barter is inherently two-sided, so
+>   the schema carries `offered_resource_id` and `offered_item`. That makes
+>   *"give an item away for free"* structurally impossible rather than merely
+>   hidden behind a dropdown, and it is the strongest answer the project has
+>   to "can someone give an item away for free?".
+> - **§4** — the verification checks, which still confirm that the codebase
+>   is barter-only. (Its expected route list predates
+>   `confirm-completion`, which came with the dual-confirmation work.)
+>
+
 **Project:** Community-Based Local Resources Exchange Portal (CBLREP)
 **Location:** Trinidad, Bohol · **Stack:** Laravel 11 API + React/Vite admin + Flutter mobile
 
