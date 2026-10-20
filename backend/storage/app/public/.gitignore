@@ -1,2 +1,9 @@
 *
 !.gitignore
+# The seeded community listings' photographs are part of the demo dataset, not
+# user data. They are fetched from Wikimedia Commons by
+# `tools/fetch_seed_photos.py` and committed so a fresh clone (or a deploy to
+# another server) has a board with real pictures on it. CREDITS.md, next to
+# them, names the author and licence of every one.
+!seed-listings/
+!seed-listings/*

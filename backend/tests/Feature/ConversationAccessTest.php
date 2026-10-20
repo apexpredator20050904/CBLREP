@@ -134,4 +134,61 @@ class ConversationAccessTest extends TestCase
         $response = $this->actingAs($seller)->getJson('/api/conversations')->assertOk();
         $this->assertCount(1, $response->json('conversations'));
     }
+
+    public function test_a_conversation_cannot_be_opened_on_a_listing_that_is_no_longer_visible(): void
+    {
+        // A listing that is archived, traded or held by a moderator is off
+        // the feed, and the barter endpoint has always refused it. The chat
+        // door used to be the way around that: a member who knew the id could
+        // open a thread about a REMOVED listing and the owner was still
+        // notified about it.
+        $seller = $this->user('Seller', 'seller@example.test');
+        $buyer = $this->user('Buyer', 'buyer@example.test');
+        $listing = $this->listing($seller);
+
+        // Exactly what an owner "Archive" and a moderator "Remove" write:
+        // status changes and is_active drops.
+        $listing->update(['status' => 'archived', 'is_active' => false]);
+
+        $this->actingAs($buyer)
+            ->postJson('/api/conversations', [
+                'user_id' => $seller->id,
+                'listing_id' => $listing->id,
+            ])
+            ->assertNotFound();
+
+        $this->assertSame(0, Conversation::where('participant_one_id', $buyer->id)->count(),
+            'No thread may be opened about a listing that is no longer visible.');
+    }
+
+    public function test_a_conversation_cannot_be_opened_on_a_moderated_listing(): void
+    {
+        $seller = $this->user('Seller', 'seller@example.test');
+        $buyer = $this->user('Buyer', 'buyer@example.test');
+        $listing = $this->listing($seller);
+
+        // The `remove` action of the moderation panel.
+        $listing->update(['status' => 'removed', 'is_active' => false]);
+
+        $this->actingAs($buyer)
+            ->postJson('/api/conversations', [
+                'user_id' => $seller->id,
+                'listing_id' => $listing->id,
+            ])
+            ->assertNotFound();
+    }
+
+    public function test_a_conversation_can_still_be_opened_on_a_live_listing(): void
+    {
+        $seller = $this->user('Seller', 'seller@example.test');
+        $buyer = $this->user('Buyer', 'buyer@example.test');
+        $listing = $this->listing($seller);
+
+        $this->actingAs($buyer)
+            ->postJson('/api/conversations', [
+                'user_id' => $seller->id,
+                'listing_id' => $listing->id,
+            ])
+            ->assertCreated();
+    }
 }

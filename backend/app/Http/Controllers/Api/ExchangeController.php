@@ -27,6 +27,27 @@ use Illuminate\Validation\ValidationException;
  *
  * If either side could accept, a proposer could agree to their own trade and
  * mark it settled without the owner ever seeing it.
+ *
+ * ── Direction ────────────────────────────────────────────────────────────
+ * The same table serves two directions, told apart by the TYPE of the listing
+ * being answered:
+ *
+ *   OFFER (owner has the item) → the proposer is the demander.
+ *                              provider = owner (supplier), receiver = proposer.
+ *
+ *   NEED  (owner wants an item) → the proposer is the SUPPLIER: "I have what
+ *                              you need". The roles swap:
+ *                              provider = proposer (supplier), receiver = owner
+ *                              (demander).
+ *
+ * The accept/reject authority is therefore phrased as "the owner of the
+ * listing", not "the provider" — for a need the owner is the demander, who is
+ * exactly the person who should decide whether to take the offer. The state
+ * machine, the dual confirmation and the notifications are shared.
+ *
+ * A PAID need is not served here at all: money has no "return side", so a
+ * paid answer is a conversation (see the app's chat opener), not a recorded
+ * exchange.
  */
 class ExchangeController extends Controller
 {
@@ -68,20 +89,17 @@ class ExchangeController extends Controller
             ->latest()
             ->get();
 
-        // A closure, not a chained where()->orWhere(), because the counts below
-        // add further constraints. Chained, AND binds tighter than OR and the
-        // count would silently over-count. Rebuilt per query because Eloquent
-        // builders are stateful and the clones below would otherwise inherit
-        // the previous call's constraints.
-        $party = fn () => Exchange::query()
-            ->where(fn ($query) => $query->where('receiver_id', $userId)
-                ->orWhere('provider_id', $userId));
-
+        // The metrics are counted from the loaded rows rather than with extra
+        // queries, because "sent" and "received" depend on the DIRECTION of
+        // the exchange: on a trade the proposer is the receiver, on a
+        // fulfilment the proposer is the provider. A plain
+        // `where('receiver_id', …)` count would read every fulfilment
+        // backwards.
         $metrics = [
-            'proposalsSent' => $party()->where('receiver_id', $userId)->count(),
-            'proposalsReceived' => $party()->where('provider_id', $userId)->count(),
-            'awaitingResponse' => $party()->where('status', Exchange::STATUS_PENDING)->count(),
-            'tradesCompleted' => $party()->where('status', Exchange::STATUS_COMPLETED)->count(),
+            'proposalsSent' => $exchanges->filter(fn ($e) => $e->proposerId() === $userId)->count(),
+            'proposalsReceived' => $exchanges->filter(fn ($e) => $e->ownerId() === $userId)->count(),
+            'awaitingResponse' => $exchanges->filter(fn ($e) => $e->status === Exchange::STATUS_PENDING)->count(),
+            'tradesCompleted' => $exchanges->filter(fn ($e) => $e->status === Exchange::STATUS_COMPLETED)->count(),
         ];
 
         // Shape once and reuse — `present()` walks four relations per row.
@@ -139,15 +157,75 @@ class ExchangeController extends Controller
         $wanted = Resource::where('is_active', true)->findOrFail($validated['resource_id']);
         abort_if($wanted->user_id === $user->id, 422, 'You cannot propose a trade for your own listing.');
 
-        // The "in return" side is what separates a barter from a gift, so at
-        // least one of the two forms must be present.
-        if (empty($validated['offered_resource_id']) && blank($validated['offered_item'] ?? null)) {
-            throw ValidationException::withMessages([
-                'offered_item' => 'Name what you are offering in return — a direct barter requires both sides.',
-            ]);
+        // ── Direction ──────────────────────────────────────────────────
+        // The listing's type decides who plays which part:
+        //
+        //   OFFER (owner has the item) → the proposer is the DEMANDER.
+        //   NEED  (owner wants an item) → the proposer is the SUPPLIER:
+        //                                 "I have what you need".
+        //
+        // The RECEIVER is the member who will hand something over, so the
+        // "offered" side of the row always belongs to the receiver:
+        //
+        //   OFFER → receiver = proposer  → the proposer offers their own
+        //           listing (today's behaviour).
+        //   NEED  → receiver = listing owner → the owner offers their side
+        //           (their `wanted_item`), and the proposer asks for it.
+        //
+        // Only which member id goes into provider_id / receiver_id changes;
+        // the column meanings, the state machine and the dual confirmation
+        // are shared by both directions.
+        $isNeed = $wanted->isNeed();
+        $receiverId = $isNeed ? $wanted->user_id : $user->id;
+
+        // A NEED cannot be answered with money through this endpoint: money
+        // has no return side, and a recorded exchange is a two-sided barter by
+        // definition. The app answers a paid need with a chat quote instead, so
+        // the two never pretend to be the same thing.
+        abort_if(
+            $isNeed && $wanted->compensationType() === Resource::PAID,
+            422,
+            'This is a paid request. Send the poster a message with your price instead of a trade proposal.',
+        );
+
+        // The return side of the trade. On a TRADE the proposer offers it and
+        // the two-sided rule holds — that is what separates a barter from a
+        // one-sided gift, and it stays absolute there.
+        //
+        // On a FULFILMENT the return side belongs to the POSTER: it is what
+        // they put on the listing, and the server writes it. A supplier
+        // therefore cannot put a different offer on the record than the one
+        // the poster actually made — the trade row always states the
+        // poster's terms, and any variation is settled in chat.
+        $posterOffer = null;
+        if ($wanted->compensationType() === Resource::BARTER) {
+            $posterOffer = trim((string) $wanted->wanted_item);
+            $posterOffer = $posterOffer !== '' ? $posterOffer : null;
         }
 
-        $exchange = DB::transaction(function () use ($validated, $wanted, $user) {
+        $offeredResourceId = $validated['offered_resource_id'] ?? null;
+
+        if ($isNeed) {
+            // A poster who named no return side leaves the supplier free to
+            // bring the item for nothing — "I need this" with no strings is a
+            // legitimate want ad, and forcing the supplier to invent a return
+            // side would mean the poster accepting a trade they never
+            // proposed. The one-sided rule that protects a TRADE is not
+            // needed here: the supplier is giving, not receiving.
+            $offeredItem = $posterOffer;
+        } else {
+            $offeredItem = isset($validated['offered_item'])
+                ? trim($validated['offered_item'])
+                : null;
+
+            if (empty($offeredResourceId) && blank($offeredItem ?? null)) {
+                throw ValidationException::withMessages([
+                    'offered_item' => 'Name what you are offering in return — a direct barter requires both sides.',
+                ]);
+            }
+        }
+
+        $exchange = DB::transaction(function () use ($validated, $wanted, $user, $isNeed, $receiverId, $offeredItem, $offeredResourceId) {
             $offered = null;
 
             // Guard the self-deal case that spans both sides of the trade.
@@ -155,18 +233,27 @@ class ExchangeController extends Controller
                 $offered = Resource::where('is_active', true)->find($validated['offered_resource_id']);
 
                 abort_if(! $offered, 422, 'The listing you are offering is no longer available.');
-                abort_if($offered->user_id !== $user->id, 422, 'You can only offer a listing that you own.');
+                // The offered side belongs to the RECEIVER, whoever that is in
+                // this direction: on an offer that is the proposer, on a need
+                // it is the poster of the want.
+                abort_if(
+                    $offered->user_id !== $receiverId,
+                    422,
+                    $isNeed
+                        ? 'You can only ask for a listing that the poster owns.'
+                        : 'You can only offer a listing that you own.',
+                );
                 abort_if($offered->id === $wanted->id, 422, 'You cannot trade a listing for itself.');
             }
 
             $exchange = Exchange::create([
                 'resource_id' => $wanted->id,
-                'offered_resource_id' => $validated['offered_resource_id'] ?? null,
-                'offered_item' => isset($validated['offered_item'])
-                    ? trim($validated['offered_item'])
-                    : null,
-                'provider_id' => $wanted->user_id,
-                'receiver_id' => $user->id,
+                'offered_resource_id' => $offeredResourceId,
+                'offered_item' => $offeredItem,
+                // OFFER: provider = the owner (supplier), receiver = proposer.
+                // NEED : provider = the proposer (supplier), receiver = owner.
+                'provider_id' => $isNeed ? $user->id : $wanted->user_id,
+                'receiver_id' => $receiverId,
                 'exchange_type' => Exchange::TYPE_BARTER,
                 'status' => Exchange::STATUS_PENDING,
                 'barangay' => $validated['barangay'],
@@ -185,8 +272,10 @@ class ExchangeController extends Controller
             $wanted->user_id,
             NotificationService::CATEGORY_EXCHANGES,
             'exchange_request',
-            'New barter proposal',
-            $user->name.' offered '.$exchange->offeredLabel().' in exchange for “'.$wanted->title.'”.',
+            $isNeed ? 'Someone has what you need' : 'New barter proposal',
+            $isNeed
+                ? $user->name.' can supply “'.$wanted->title.'”.'
+                : $user->name.' offered '.$exchange->offeredLabel().' in exchange for “'.$wanted->title.'”.',
             ['exchange_id' => $exchange->id, 'resource_id' => $wanted->id],
         );
 
@@ -246,13 +335,22 @@ class ExchangeController extends Controller
         //
         // The proposer is deliberately unable to accept, otherwise they could
         // agree to their own trade unilaterally.
+        //
+        // "The listing owner" — not "the provider" — because the two roles
+        // swap with the direction: on an offer the owner is the supplier and
+        // answers "shall I trade with you?"; on a need the owner is the
+        // demander and answers "shall I take what this neighbour is bringing?".
+        // Either way the person who posted the listing is the one who
+        // decides, and the person who answered it cannot decide for them.
         $ownerOnly = in_array($target, [
             Exchange::STATUS_ACCEPTED,
             Exchange::STATUS_REJECTED,
         ], true);
 
+        $listingOwnerId = (int) ($exchange->resource?->user_id ?? 0);
+
         abort_if(
-            $ownerOnly && $exchange->provider_id !== $userId,
+            $ownerOnly && $listingOwnerId !== $userId,
             403,
             'Only the owner of the listing can accept or decline this proposal.',
         );
@@ -323,7 +421,10 @@ class ExchangeController extends Controller
             'Only an accepted barter can be confirmed as completed. The owner must accept it first.'
         );
 
-        $isProposer = $exchange->receiver_id === $userId;
+        // The proposer's half is theirs in either direction: on a trade the
+        // proposer is the demander, on a fulfilment the supplier. The listing
+        // owner holds the other half.
+        $isProposer = $exchange->proposerId() === $userId;
 
         $completed = DB::transaction(function () use ($exchange, $isProposer, $userId) {
             $now = now();
@@ -387,26 +488,25 @@ class ExchangeController extends Controller
     {
         $userId = $request->user()->id;
 
-        // An exchange is "incoming" for the member who was asked to trade:
-        // the provider (owner of the wanted listing). The proposer sees it as
-        // "outgoing". Same partition the old barter_proposals endpoint used.
-        $incoming = Exchange::with(['resource', 'offeredResource', 'receiver', 'provider'])
-            ->where('provider_id', $userId)
+        $rows = Exchange::with(['resource', 'offeredResource', 'receiver', 'provider'])
+            ->where(fn ($query) => $query->where('receiver_id', $userId)
+                ->orWhere('provider_id', $userId))
             ->latest()
-            ->get()
-            ->map(fn (Exchange $e) => $this->present($e, $userId))
-            ->values();
+            ->get();
 
-        $outgoing = Exchange::with(['resource', 'offeredResource', 'receiver', 'provider'])
-            ->where('receiver_id', $userId)
-            ->latest()
-            ->get()
-            ->map(fn (Exchange $e) => $this->present($e, $userId))
-            ->values();
+        // "Incoming" = someone answered MY listing and is waiting for my
+        // decision; "outgoing" = I answered someone else's. The split follows
+        // the direction, so on a fulfilment the supplier's answer counts as
+        // outgoing even though it sits in `provider_id`.
+        [$incoming, $outgoing] = $rows->partition(fn ($e) => $e->ownerId() === $userId);
 
         return response()->json([
-            'incoming' => $incoming,
-            'outgoing' => $outgoing,
+            'incoming' => $incoming
+                ->map(fn (Exchange $e) => $this->present($e, $userId))
+                ->values(),
+            'outgoing' => $outgoing
+                ->map(fn (Exchange $e) => $this->present($e, $userId))
+                ->values(),
         ]);
     }
 
@@ -457,18 +557,42 @@ class ExchangeController extends Controller
      * Shape one barter for the mobile client.
      *
      * `role` tells the app which side of the trade the signed-in member is on,
-     * so the UI can render "Accept / Decline" for the owner and "Cancel" for
-     * the proposer without re-deriving it from ids.
+     * so the UI can render "Accept / Decline" for the listing owner and
+     * "Cancel" for the proposer without re-deriving it from ids.
+     *
+     * `direction` says which kind of exchange this is, because the two read
+     * differently in the UI and mean different things in the real world:
+     *
+     *   trade      → an OFFER answered with a proposal to swap.
+     *   fulfilment → a NEED answered with "I have what you need".
+     *
+     * The roles swap with the direction, so `role` is derived from the model
+     * (which knows the listing's type) rather than from a raw id comparison.
      */
     private function present(Exchange $exchange, int $viewerId): array
     {
-        $isProposer = $exchange->receiver_id === $viewerId;
+        $isNeed = $exchange->isNeed();
+        $isProposer = $exchange->proposerId() === $viewerId;
+        $isOwner = $exchange->ownerId() === $viewerId;
+
+        // The counterparty is simply the other member of the pair, whichever
+        // side each of them is on.
+        $counterpartyId = $viewerId === $exchange->provider_id
+            ? $exchange->receiver_id
+            : $exchange->provider_id;
+        $counterparty = $counterpartyId === $exchange->provider_id
+            ? $exchange->provider
+            : $exchange->receiver;
 
         return [
             'id' => $exchange->id,
             'type' => $exchange->frontendType(),
             'status' => $exchange->frontendStatus(),
             'raw_status' => $exchange->status,
+            // trade | fulfilment — drives the wording on both sides. (Named
+            // `kind`, not `direction`: `direction` is taken by the legacy
+            // incoming/outgoing alias further down.)
+            'kind' => $isNeed ? 'fulfilment' : 'trade',
             'barangay' => $exchange->barangay,
             'purok_sitio' => $exchange->purok_sitio,
 
@@ -478,9 +602,11 @@ class ExchangeController extends Controller
             // Item the proposer puts up in return
             'offered' => $exchange->offeredLabel(),
 
-            'withUser' => ($isProposer ? $exchange->provider : $exchange->receiver)?->name ?? 'Community Member',
+            'withUser' => $counterparty?->name ?? 'Community Member',
             'role' => $isProposer ? 'proposer' : 'owner',
-            'can_respond' => ! $isProposer && $exchange->status === Exchange::STATUS_PENDING,
+            // Only the listing owner may accept or decline — on a need that is
+            // the demander deciding whether to take what is being brought.
+            'can_respond' => $isOwner && $exchange->status === Exchange::STATUS_PENDING,
             'can_cancel' => in_array($exchange->status, [
                 Exchange::STATUS_PENDING,
                 Exchange::STATUS_ACCEPTED,
@@ -509,7 +635,7 @@ class ExchangeController extends Controller
             // read these field names. They are aliases of the values above,
             // computed from the same relations — one model, one shape.
             'direction' => $isProposer ? 'outgoing' : 'incoming',
-            'counterparty' => ($isProposer ? $exchange->provider : $exchange->receiver)?->name ?? 'Member',
+            'counterparty' => $counterparty?->name ?? 'Member',
             'created_at' => $exchange->created_at?->format('M j, Y') ?? 'Today',
             'offered_item' => $this->itemPayload($exchange->offeredResource),
             'requested_item' => $this->itemPayload($exchange->resource),
@@ -538,14 +664,25 @@ class ExchangeController extends Controller
             ? $exchange->receiver_id
             : $exchange->provider_id;
 
+        // The wording follows the direction: a trade is a swap between two
+        // neighbours, a fulfilment is someone bringing what a neighbour asked
+        // for.
+        $title = $exchange->isNeed()
+            ? 'Request '.strtolower($exchange->frontendStatus())
+            : 'Barter '.strtolower($exchange->frontendStatus());
+
+        $body = $exchange->isNeed()
+            ? '“'.$exchange->requestedLabel().'” is now '.strtolower($exchange->frontendStatus()).'.'
+            : $exchange->requestedLabel().' ↔ '.$exchange->offeredLabel()
+                .' is now '.$exchange->frontendStatus().'.';
+
         try {
             app(NotificationService::class)->notify(
                 $recipientId,
                 NotificationService::CATEGORY_EXCHANGES,
                 'exchange_update',
-                'Barter '.strtolower($exchange->frontendStatus()),
-                $exchange->requestedLabel().' ↔ '.$exchange->offeredLabel()
-                    .' is now '.$exchange->frontendStatus().'.',
+                $title,
+                $body,
                 ['exchange_id' => $exchange->id, 'status' => $status],
             );
         } catch (\Throwable $e) {

@@ -19,6 +19,10 @@ class DeviceTokenController extends Controller
         $validated = $request->validate([
             'token' => ['required', 'string', 'max:512'],
             'platform' => ['nullable', 'string', 'in:android,ios,web'],
+            // The build the device is running. The app sends it on every
+            // registration, so the server always knows who is behind and can
+            // notify only those members when a new release is published.
+            'build_number' => ['nullable', 'integer', 'min:0', 'max:100000'],
         ]);
 
         // updateOrCreate keyed on the token: if the device previously belonged
@@ -29,6 +33,7 @@ class DeviceTokenController extends Controller
             [
                 'user_id' => $request->user()->id,
                 'platform' => $validated['platform'] ?? 'android',
+                'build_number' => $validated['build_number'] ?? null,
                 'last_used_at' => now(),
             ],
         );

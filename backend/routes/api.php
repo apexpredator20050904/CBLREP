@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\ExchangeController;
 use App\Http\Controllers\Api\ListingController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\NotificationPreferenceController;
+use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\VerificationReportsController;
 use Illuminate\Support\Facades\Route;
 
@@ -164,6 +165,12 @@ Route::middleware('auth:sanctum')->group(function () {
     // Member announcements and action notifications.
     Route::get('/notifications', [NotificationController::class, 'index']);
     Route::put('/notifications/{id}/read', [NotificationController::class, 'read']);
+    // Mark the whole inbox as read, and let a member clear their history.
+    // The literal segments are declared before the {id} routes so they can
+    // never be swallowed by the parameterised ones.
+    Route::put('/notifications/read-all', [NotificationController::class, 'readAll']);
+    Route::delete('/notifications', [NotificationController::class, 'destroyAll']);
+    Route::delete('/notifications/{id}', [NotificationController::class, 'destroy']);
 
     // Push-notification preferences (the server-side mirror of the mobile
     // Settings toggles; only the server can actually gate an FCM send).
@@ -174,6 +181,17 @@ Route::middleware('auth:sanctum')->group(function () {
     // removes it on sign-out so a signed-out device stops receiving pushes.
     Route::post('/device-tokens', [DeviceTokenController::class, 'store']);
     Route::delete('/device-tokens', [DeviceTokenController::class, 'destroy']);
+
+    // ── Community safety reports ──────────────────────────────────────
+    // A member reports a malicious listing or a member's account. The
+    // endpoint is authenticated (a report is a statement by a named member)
+    // and throttled per member, so the queue cannot be flooded from one
+    // account. The admin review queue lives under /admin/safety-reports
+    // because /admin/reports is already taken by the older flagged-listing
+    // queue (VerificationReportsController).
+    Route::post('/reports', [ReportController::class, 'store'])
+        ->middleware('throttle:report-create');
+    Route::get('/reports/mine', [ReportController::class, 'mine']);
 
     /*
      * Admin portal — endpoints consumed by frontend/src/admin pages.
@@ -197,6 +215,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/exchanges', [AdminPortalController::class, 'exchanges']);
         Route::get('/reports', [VerificationReportsController::class, 'index']);
         Route::post('/reports/{id}/resolve', [VerificationReportsController::class, 'resolve']);
+
+        // Community safety reports (member-filed) — the moderation queue for
+        // malicious listings and accounts. Distinct from the flagged-listing
+        // queue above, which reads moderator flags off the listings table.
+        Route::get('/safety-reports', [ReportController::class, 'index']);
+        Route::patch('/safety-reports/{id}', [ReportController::class, 'update']);
         Route::get('/map', [AdminPortalController::class, 'map']);
         Route::get('/analytics', [AdminPortalController::class, 'analytics']);
 

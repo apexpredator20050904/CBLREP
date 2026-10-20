@@ -27,6 +27,14 @@
 # It is user data, never source — keep it out of the repository.
 /storage/app/public/*
 !/storage/app/public/.gitignore
+# The seeded community listings' photographs are part of the demo dataset, not
+# user data: they are fetched from Wikimedia Commons by
+# `tools/fetch_seed_photos.py` and committed here so a fresh clone (or a deploy
+# to another server) has a board with real pictures on it. The credits for
+# every one of them sit next to them in CREDITS.md. The directory itself has
+# to be un-ignored first, or git never looks inside it.
+/storage/app/public/seed-listings/
+!/storage/app/public/seed-listings/*
 /storage/app/private/*
 !/storage/app/private/.gitignore
 # Proof-of-residency documents now live on the `local` (private) disk, served

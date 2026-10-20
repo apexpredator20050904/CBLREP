@@ -34,6 +34,7 @@ class NotificationPreferenceController extends Controller
             'exchanges' => ['sometimes', 'boolean'],
             'announcements' => ['sometimes', 'boolean'],
             'account' => ['sometimes', 'boolean'],
+            'updates' => ['sometimes', 'boolean'],
         ]);
 
         $user = $request->user();

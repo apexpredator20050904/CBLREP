@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\Category;
+use App\Models\ContentPage;
 use App\Models\Conversation;
 use App\Models\Exchange;
 use App\Models\MemberNotification;
@@ -47,6 +48,7 @@ class DemoSeeder extends Seeder
         $listings = $this->seedListings($members, $categories);
         $this->seedExchanges($members, $listings);
         $this->seedConversations($members, $listings);
+        $this->seedExampleContentPage();
 
         $this->command->info('─────────────────────────────────────────────');
         $this->command->info('  Demo data ready (non-destructive)');
@@ -58,12 +60,44 @@ class DemoSeeder extends Seeder
         $this->command->info('─────────────────────────────────────────────');
     }
 
+    /**
+     * Example public content page (idempotent — safe to re-run).
+     *
+     * Reachable anonymously at GET /api/page/waste-segregation-guide and, via
+     * the React public route, at /page/waste-segregation-guide — the smoke
+     * test for the public content-page feature.
+     */
+    private function seedExampleContentPage(): void
+    {
+        $adminId = User::query()->orderBy('id')->value('id');
+
+        ContentPage::firstOrCreate(
+            ['slug' => 'waste-segregation-guide'],
+            [
+                'title' => 'Waste Segregation Guide',
+                'body' => '<h2>Waste Segregation Guide</h2>'
+                    . '<p>Trinidad barangays sort household waste into three bins:</p>'
+                    . '<ul>'
+                    . '<li><strong>Green bin</strong> — organic waste (fruit peels, coffee grounds, garden trimmings).</li>'
+                    . '<li><strong>Blue bin</strong> — recyclables (plastic bottles, glass jars, steel cans, newspapers).</li>'
+                    . '<li><strong>Black bin</strong> — general refuse.</li>'
+                    . '</ul>'
+                    . '<p>Rinse all recyclables before binning and keep them dry.</p>',
+                'status' => 'published',
+                'created_by' => $adminId,
+                'published_at' => now()->subDay(),
+            ]
+        );
+
+        $this->command->info('  Public example page: /page/waste-segregation-guide');
+    }
+
     /** @return array<string,Category> keyed by name */
     private function seedCategories(): array
     {
         $names = [
             'Appliances', 'Electronics', 'Furniture', 'Garden',
-            'Tools', 'Sports', 'Education', 'Home',
+            'Tools', 'Sports', 'Education', 'Home', 'Food',
         ];
 
         $categories = [];
@@ -207,22 +241,58 @@ class DemoSeeder extends Seeder
                 'description' => 'Mixed seasonal vegetables harvested this morning from our plot.',
                 'compensation' => 'paid', 'wanted' => null, 'price' => 150.00,
             ],
+            // ── NEEDS ────────────────────────────────────────────────────
+            // A need is the same listing read from the other end: the price
+            // is a budget ceiling, the wanted item is what the POSTER can
+            // trade, and the quantity is how much is wanted. Seeding one of
+            // each shape so a fresh install shows the whole matrix.
+            [
+                'slug' => 'need_rice_sack', 'owner' => 'maria', 'category' => 'Food',
+                'type' => 'request',
+                'title' => 'Looking for: Extra Rice Sack',
+                'description' => 'Our neighbours shared a sack last planting season and we would like to do the same. Can trade eggs or a couple of hours of childcare.',
+                'compensation' => 'barter', 'wanted' => 'One tray of eggs, or 2 hours of childcare',
+                'quantity' => '1 sack (25 kg)', 'condition' => 'Any',
+            ],
+            [
+                'slug' => 'need_cooking_pot', 'owner' => 'ana', 'category' => 'Home',
+                'type' => 'request',
+                'title' => 'Looking for: Big Cooking Pot',
+                'description' => 'Something big enough to cook for a whole barangay gathering. Budget is firm, but we can pick it up today.',
+                'compensation' => 'paid', 'wanted' => null, 'price' => 300.00,
+                'quantity' => '1 large pot', 'condition' => 'Working',
+            ],
+            [
+                // The no-strings case: the poster named no return side, so a
+                // neighbour may bring it and ask for nothing back.
+                'slug' => 'need_study_lamp', 'owner' => 'jose', 'category' => 'Electronics',
+                'type' => 'request',
+                'title' => 'Looking for: Working Study Lamp',
+                'description' => 'Any working lamp for the night shift. No strings attached — we will take whatever you can spare.',
+                'compensation' => 'barter', 'wanted' => null,
+                'quantity' => '1 lamp', 'condition' => 'Any',
+            ],
         ];
 
         $listings = [];
         foreach ($rows as $row) {
             $owner = $members[$row['owner']];
             $category = $categories[$row['category']];
+            $type = $row['type'] ?? 'offer';
 
             $listings[$row['slug']] = Resource::firstOrCreate(
                 ['user_id' => $owner->id, 'title' => $row['title']],
                 [
                     'category_id' => $category->id,
-                    'type' => 'offer',
+                    'type' => $type,
                     'compensation_type' => $row['compensation'],
                     'wanted_item' => $row['compensation'] === Resource::BARTER ? $row['wanted'] : null,
                     'price' => $row['compensation'] === Resource::PAID ? ($row['price'] ?? null) : null,
-                    'condition' => 'Good',
+                    // How much is needed — a need-only field.
+                    'quantity' => $type === 'request' ? ($row['quantity'] ?? null) : null,
+                    // On an offer the condition is the item's state; on a need
+                    // it is what the poster can accept.
+                    'condition' => $row['condition'] ?? 'Good',
                     'description' => $row['description'],
                     'location' => $owner->barangay.', '.$owner->purok_sitio,
                     'barangay' => $owner->barangay,

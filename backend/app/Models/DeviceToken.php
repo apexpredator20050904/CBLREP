@@ -17,6 +17,10 @@ class DeviceToken extends Model
         'user_id',
         'token',
         'platform',
+        // The versionCode (build number) the device is running, reported by the
+        // app each time it registers. The server uses it to notify only the
+        // members who are actually behind, instead of buzzing everybody.
+        'build_number',
         'last_used_at',
     ];
 

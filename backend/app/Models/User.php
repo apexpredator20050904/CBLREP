@@ -106,7 +106,7 @@ class User extends Authenticatable
     // ------------------------------------------------------------------
 
     /** The categories a member can tune independently in Settings. */
-    public const NOTIFICATION_CATEGORIES = ['messages', 'exchanges', 'announcements', 'account'];
+    public const NOTIFICATION_CATEGORIES = ['messages', 'exchanges', 'announcements', 'account', 'updates'];
 
     /**
      * The member's effective preferences, with every category defaulting on.
@@ -179,6 +179,18 @@ class User extends Authenticatable
     public function deviceTokens()
     {
         return $this->hasMany(DeviceToken::class);
+    }
+
+    /**
+     * Community safety reports this member filed.
+     *
+     * The relation is nullable on the reports table (a report outlives the
+     * account that filed it), so this only returns the reports of members
+     * who still exist.
+     */
+    public function reports()
+    {
+        return $this->hasMany(Report::class, 'reporter_id');
     }
 
     // ------------------------------------------------------------------
