@@ -1,18 +1,31 @@
-# React + Vite
+# CBLREP — Admin console (React + Vite)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The municipal console for Trinidad, Bohol: verify residents, moderate
+Offers & Needs, follow the barter ledger, handle reports and export the
+analytics.
 
-Currently, two official plugins are available:
+| | |
+| --- | --- |
+| **Branch** | `front-end` — the source of truth for `frontend/` in the monorepo |
+| **Stack** | React 19 · Vite 8 · Tailwind 4 · Leaflet |
+| **Deployed at** | **https://cblrep-frontend.vercel.app** (Vercel redeploys it on every push to `main`) |
+| **Docs** | [DEPLOYMENT.md](https://github.com/apexpredator20050904/CBLREP/blob/main/DEPLOYMENT.md) · [RUNNING.md](https://github.com/apexpredator20050904/CBLREP/blob/main/RUNNING.md) |
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Run it
 
-## React Compiler
+```bash
+npm install
+npm run dev        # Vite dev server on :5173, proxies /api/* to the API
+npm run check      # lint + production build — the same gate CI and Vercel run
+```
 
-The React Compiler is enabled on this template. See [this documentation](https://react.dev/learn/react-compiler) for more information.
+`VITE_API_BASE_URL` stays **empty** for local development: requests are
+relative `/api/*` and the Vite proxy forwards them to the API. On Vercel it
+is the console's own origin, because `/api/*` is proxied to the API by a
+rewrite — see [DEPLOYMENT.md](https://github.com/apexpredator20050904/CBLREP/blob/main/DEPLOYMENT.md).
 
-Note: This will impact Vite dev & build performances.
+## Sign in
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+`admin@cblrep.ph` / `adminpass123`, then the TOTP code from your
+authenticator app. The console's data comes from the API, so the API and its
+tunnel have to be running.
