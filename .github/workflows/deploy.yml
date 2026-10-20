@@ -43,8 +43,12 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$DEPLOY_HOST" ] || [ -z "$DEPLOY_SSH_KEY" ]; then
-            echo "::error::The deploy secrets are not set on this repository."
-            exit 1
+            # The host has not been wired to this repository yet. Say so and
+            # stop, rather than failing every push — but once the secrets
+            # ARE set, a broken deployment is a real failure and stops the
+            # build loudly.
+            echo "::notice::The deploy secrets are not set on this repository — nothing was deployed."
+            exit 0
           fi
           mkdir -p ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
