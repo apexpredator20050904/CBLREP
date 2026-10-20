@@ -127,11 +127,24 @@ jobs:
         # bootstrap/cache and storage/ are git-ignored, so a fresh checkout
         # has neither, and Composer's package:discover step needs the cache
         # directory to exist and be writable.
+        #
+        # The .env is the same story: Laravel reads the environment file on
+        # every boot, and a checkout without one raises a warning that
+        # PHPUnit reports on EVERY test (the suite still passed, but 200
+        # warnings is not a clean run). A minimal file settles it — the real
+        # values come from this job's environment, which takes precedence
+        # over the file.
         run: |
           mkdir -p bootstrap/cache \
                    storage/framework/cache storage/framework/sessions \
                    storage/framework/views storage/logs storage/app/public
           chmod -R 777 bootstrap/cache storage
+          cat > .env <<'EOF'
+          APP_KEY=base64:Iyy5AyC+F1sVlP0EA6cBMMki94/jEwQgku+M1Jvp1I0=
+          APP_ENV=testing
+          APP_DEBUG=false
+          DB_CONNECTION=mysql
+          EOF
 
       - name: Cache the Composer packages
         uses: actions/cache@v4
