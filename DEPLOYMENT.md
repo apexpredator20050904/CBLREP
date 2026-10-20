@@ -51,6 +51,21 @@ When `api.cblrep.ph` serves again:
 The `api.cblrep.ph` origin is already in the API's `allowed_origins`, so no
 CORS change is needed for that move.
 
+### The two Vercel projects
+
+| Project | Serves | Deploys from |
+| --- | --- | --- |
+| `cblrep-frontend` | **The console.** `https://cblrep-frontend.vercel.app` | `main`, and any pull request |
+| `cblrep` | A second copy of the same console. Harmless, but it doubles the deploys and adds a second red check on every pull request — worth deleting if you are not using it. | `main` only |
+
+The tier branches (`back-end`, `front-end`, `flutter-app`) are **skipped** on
+purpose: they hold one tier at their root, so the console's `frontend/`
+directory is not there to build. Each project carries an *ignored build
+step* that skips those branches rather than failing them.
+
+To see or change those rules: **Vercel → the project → Settings → Git →
+Ignored Build Step**.
+
 ---
 
 ## 1. Configuration (already in the repo)
