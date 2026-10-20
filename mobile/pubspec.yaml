@@ -38,7 +38,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_map: ^8.2.2
-  latlong2: ^0.9.1
+  latlong2: ^0.10.1
   geolocator: ^14.0.2
   cupertino_icons: ^1.0.8
   dio: ^5.8.0+1
