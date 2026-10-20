@@ -143,6 +143,13 @@ jobs:
       - name: Install the dependencies
         run: composer install --no-interaction --prefer-dist --no-progress --optimize-autoloader
 
+      - name: Link the public storage disk
+        # Uploaded photos live in storage/app/public and are served through
+        # public/storage. Without the link the upload tests fail on a
+        # file_get_contents of a path that does not exist — a warning on
+        # every test that touches a photo.
+        run: php artisan storage:link
+
       - name: Migrate the test schema
         # The suite runs against a real schema (phpunit.xml says why SQLite is
         # unusable here) and uses DatabaseTransactions, so the schema has to be
