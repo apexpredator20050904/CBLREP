@@ -1,0 +1,245 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CI — the gate for every tier of the CBLREP portal
+# ─────────────────────────────────────────────────────────────────────────────
+# This file lives at the root of FOUR branches, and it detects at runtime which
+# layout it is looking at:
+#
+#   main        → backend/, frontend/, mobile/   (the monorepo)
+#   back-end    → the Laravel API at the root
+#   front-end   → the React console at the root
+#   flutter-app → the Flutter app at the root
+#
+# One file, two modes. When a tier branch is subtree-merged into main, its
+# copy of this file lands in main's subdirectory (backend/.github/…); GitHub
+# only reads workflows from the repository root, so that copy is inert — the
+# root copy is the one that runs.
+#
+# The three suites:
+#   backend  → PHPUnit against a real MariaDB (the suite needs MariaDB: one
+#              migration uses MariaDB-only DDL, and pdo_sqlite is absent).
+#   frontend → ESLint + the production build, the same gate Vercel runs.
+#   mobile   → flutter analyze + flutter test (widget tests, no device).
+#
+# Two traps this file exists to defuse:
+#
+#   1. The backend suite SKIPS (green) when the database is unreachable, so a
+#      broken connection would report success with zero tests run. The
+#      `migrate:status` precheck fails the job before the suite starts.
+#   2. `flutter analyze` exits non-zero on the project's pre-existing infos,
+#      so it is gated with --no-fatal-warnings --no-fatal-infos: only real
+#      errors block a build.
+# ─────────────────────────────────────────────────────────────────────────────
+name: CI
+
+on:
+  pull_request:
+    branches: [main, back-end, front-end, flutter-app]
+  push:
+    branches: [main, back-end, front-end, flutter-app]
+  workflow_dispatch:
+
+# Least privilege: the gate only ever reads the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Which layout is this? ───────────────────────────────────────────────
+  detect:
+    name: Detect the layout
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.detect.outputs.backend }}
+      frontend: ${{ steps.detect.outputs.frontend }}
+      mobile: ${{ steps.detect.outputs.mobile }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: detect
+        name: Find the tiers
+        run: |
+          set -euo pipefail
+          if [ -f backend/artisan ]; then
+            # The monorepo: all three tiers live side by side.
+            echo "backend=backend"    >> "$GITHUB_OUTPUT"
+            echo "frontend=frontend"  >> "$GITHUB_OUTPUT"
+            echo "mobile=mobile"      >> "$GITHUB_OUTPUT"
+          elif [ -f artisan ]; then
+            echo "backend=." >> "$GITHUB_OUTPUT"
+          elif [ -f package.json ]; then
+            echo "frontend=." >> "$GITHUB_OUTPUT"
+          elif [ -f pubspec.yaml ]; then
+            echo "mobile=." >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Unrecognised layout — nothing to test."
+            exit 1
+          fi
+
+  # ── Laravel API ─────────────────────────────────────────────────────────
+  backend:
+    name: Backend · PHP tests
+    needs: detect
+    if: needs.detect.outputs.backend != ''
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: community-based-portal
+          MARIADB_USER: cblrep
+          MARIADB_PASSWORD: cblrep
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    defaults:
+      run:
+        working-directory: ${{ needs.detect.outputs.backend }}
+    env:
+      # The suite's phpunit.xml deliberately omits the password (it is a
+      # secret) and the TestCase falls back to the process environment, so
+      # these are what the suite reads. The APP_KEY is a throwaway for the
+      # throwaway schema.
+      APP_KEY: base64:Iyy5AyC+F1sVlP0EA6cBMMki94/jEwQgku+M1Jvp1I0=
+      APP_ENV: testing
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_DATABASE: community-based-portal
+      DB_USERNAME: cblrep
+      DB_PASSWORD: cblrep
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql, mbstring, openssl, tokenizer, xml, curl, fileinfo, gd, bcmath, intl, zip
+          coverage: none
+
+      - name: Prepare the Laravel directories
+        # bootstrap/cache and storage/ are git-ignored, so a fresh checkout
+        # has neither, and Composer's package:discover step needs the cache
+        # directory to exist and be writable.
+        #
+        # The .env is the same story: Laravel reads the environment file on
+        # every boot, and a checkout without one raises a warning that
+        # PHPUnit reports on EVERY test (the suite still passed, but 200
+        # warnings is not a clean run). A minimal file settles it — the real
+        # values come from this job's environment, which takes precedence
+        # over the file.
+        run: |
+          mkdir -p bootstrap/cache \
+                   storage/framework/cache storage/framework/sessions \
+                   storage/framework/views storage/logs storage/app/public
+          chmod -R 777 bootstrap/cache storage
+          cat > .env <<'EOF'
+          APP_KEY=base64:Iyy5AyC+F1sVlP0EA6cBMMki94/jEwQgku+M1Jvp1I0=
+          APP_ENV=testing
+          APP_DEBUG=false
+          DB_CONNECTION=mysql
+          EOF
+
+      - name: Cache the Composer packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ needs.detect.outputs.backend }}/vendor
+          key: composer-${{ runner.os }}-${{ needs.detect.outputs.backend }}-${{ hashFiles('**/composer.lock') }}
+          restore-keys: composer-${{ runner.os }}-${{ needs.detect.outputs.backend }}-
+
+      - name: Install the dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress --optimize-autoloader
+
+      - name: Link the public storage disk
+        # Uploaded photos live in storage/app/public and are served through
+        # public/storage. Without the link the upload tests fail on a
+        # file_get_contents of a path that does not exist — a warning on
+        # every test that touches a photo.
+        run: php artisan storage:link
+
+      - name: Migrate the test schema
+        # The suite runs against a real schema (phpunit.xml says why SQLite is
+        # unusable here) and uses DatabaseTransactions, so the schema has to be
+        # current before the suite starts.
+        run: php artisan migrate --force
+
+      - name: Check the database is reachable
+        # The guard against the skip-trap: the suite marks every test
+        # skipped when it cannot reach the database, and a skipped suite is
+        # GREEN. This step fails the job instead.
+        run: |
+          php artisan migrate:status
+          php artisan tinker --execute='
+            if (! DB::getSchemaBuilder()->hasTable("users")) {
+              throw new RuntimeException("The test schema has no tables — the suite would skip every test.");
+            }
+            echo "test schema ready: ", DB::table("migrations")->count(), " migrations applied\n";
+          '
+
+      - name: Run the test suite
+        run: php artisan test
+
+  # ── React admin console ─────────────────────────────────────────────────
+  frontend:
+    name: Frontend · lint + build
+    needs: detect
+    if: needs.detect.outputs.frontend != ''
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ needs.detect.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: ${{ needs.detect.outputs.frontend }}/package-lock.json
+
+      - name: Install the dependencies
+        run: npm ci
+
+      - name: Lint and build
+        # The same gate Vercel runs: ESLint must report 0 problems and the
+        # production bundle must build.
+        run: npm run check
+
+  # ── Flutter app ─────────────────────────────────────────────────────────
+  mobile:
+    name: Mobile · analyze + test
+    needs: detect
+    if: needs.detect.outputs.mobile != ''
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ needs.detect.outputs.mobile }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install the packages
+        run: flutter pub get
+
+      - name: Analyze
+        # Only real errors block the build. The project carries pre-existing
+        # infos (deprecated members, context-across-async-gap) that are not
+        # worth failing every push over; they are tracked as debt, not as
+        # gate failures.
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
+
+      - name: Run the widget tests
+        # Widget tests only — no device or emulator is required.
+        run: flutter test

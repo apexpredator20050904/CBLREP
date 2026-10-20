@@ -1,0 +1,177 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Release — a signed Android APK, published and announced to the app
+# ─────────────────────────────────────────────────────────────────────────────
+# Pushing a `v*` tag builds the release APKs, signs them with the release
+# keystore, publishes them as GitHub Release assets, and points the deployed
+# server's release channel at the new asset — so a phone on an older build
+# sees the update prompt on its next launch and downloads the new one.
+#
+# Two assets, matching the project's convention:
+#
+#   app-release.apk       → points at the production API (api.cblrep.ph)
+#   app-release-ngrok.apk → points at the ngrok tunnel (the reserved
+#                           subdomain), for testing against a dev backend
+#
+# The tag is the version: `v1.5.5` must match the `version:` line in
+# mobile/pubspec.yaml, and the build number in that line is the versionCode
+# the server publishes to the app. A mismatch fails the job rather than
+# publishing an APK the update channel cannot describe.
+#
+# Secrets: ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
+#          ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+# Variables: PRODUCTION_API_URL, NGROK_API_URL
+# ─────────────────────────────────────────────────────────────────────────────
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v1.5.5)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish the APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the app version
+        id: version
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          LINE="$(grep -E '^version:' pubspec.yaml)"
+          VERSION="${LINE#version: }"
+          NAME="${VERSION%%+*}"
+          BUILD="${VERSION##*+}"
+          if [ "$TAG" != "v$NAME" ]; then
+            echo "::error::The tag '$TAG' does not match the app version 'v$NAME' in pubspec.yaml."
+            exit 1
+          fi
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "code=$BUILD" >> "$GITHUB_OUTPUT"
+          echo "Releasing v$NAME (build $BUILD)"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Restore the release keystore
+        # The keystore never enters the repository — it is restored from the
+        # secrets into the build directory only.
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$STORE_PASSWORD" ]; then
+            echo "::error::The signing secrets are not set on this repository."
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > android/cblrep-release.jks
+          cat > android/key.properties <<EOF
+          storeFile=cblrep-release.jks
+          storePassword=$STORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+
+      - name: Build the production APK
+        env:
+          API_URL: ${{ vars.PRODUCTION_API_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "$API_URL" ]; then
+            echo "::error::PRODUCTION_API_URL is not set on this repository."
+            exit 1
+          fi
+          flutter build apk --release --dart-define=CBLREP_API_URL="$API_URL"
+          cp build/app/outputs/flutter-apk/app-release.apk ../app-release.apk
+
+      - name: Build the ngrok APK
+        env:
+          API_URL: ${{ vars.NGROK_API_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "$API_URL" ]; then
+            echo "::error::NGROK_API_URL is not set on this repository."
+            exit 1
+          fi
+          flutter build apk --release --dart-define=CBLREP_API_URL="$API_URL"
+          cp build/app/outputs/flutter-apk/app-release.apk ../app-release-ngrok.apk
+
+      - name: Publish the release
+        id: publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: |
+          set -euo pipefail
+          cd ..
+          sha256sum app-release.apk app-release-ngrok.apk | tee release-checksums.txt
+          PRODUCTION_SHA="$(awk '/app-release.apk$/{print $1}' release-checksums.txt)"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" app-release.apk app-release-ngrok.apk --clobber
+          else
+            gh release create "$TAG" app-release.apk app-release-ngrok.apk \
+              --title "CBLREP Mobile $TAG" \
+              --notes "Automatic release. See the repository's changelog for what changed."
+          fi
+          echo "production_sha=$PRODUCTION_SHA" >> "$GITHUB_OUTPUT"
+          echo "published $TAG"
+
+      - name: Point the server's release channel at the new asset
+        # The app asks GET /api/app-version on launch. Publishing the APK is
+        # only half of a release: the deployed server has to describe it, or
+        # the update prompt keeps serving the previous asset.
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+          PRODUCTION_SHA: ${{ steps.publish.outputs.production_sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DEPLOY_HOST" ] || [ -z "$DEPLOY_SSH_KEY" ]; then
+            echo "::notice::No deploy secrets — the release channel was not updated."
+            exit 0
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/app-release.apk"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new "$DEPLOY_USER@$DEPLOY_HOST" bash -s <<EOF
+          set -euo pipefail
+          cd /var/www/cblrep/backend
+          sed -i "s|^APP_VERSION_CODE=.*|APP_VERSION_CODE=$VERSION_CODE|" .env
+          sed -i "s|^APP_VERSION_NAME=.*|APP_VERSION_NAME=$VERSION_NAME|" .env
+          sed -i "s|^APP_APK_URL=.*|APP_APK_URL=$URL|" .env
+          sed -i "s|^APP_APK_SHA256=.*|APP_APK_SHA256=$PRODUCTION_SHA|" .env
+          php artisan config:clear
+          echo "release channel now:"
+          grep -E '^APP_(VERSION_CODE|VERSION_NAME|APK_URL|APK_SHA256)=' .env
+          EOF
