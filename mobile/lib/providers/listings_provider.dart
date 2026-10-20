@@ -31,6 +31,31 @@ class ListingsProvider extends ChangeNotifier {
 
   Timer? _pollTimer;
 
+  // ── Active feed filters ──────────────────────────────────────────────
+  //
+  // The feed polls the backend every few seconds, and that poll used to
+  // call load() with no arguments — which silently reset whatever the member
+  // had typed or picked, so a search evaporated on its own. The filters the
+  // feed is currently showing are therefore remembered here and re-applied
+  // by every subsequent load, whatever triggered it.
+  String _query = '';
+  String _barangay = '';
+  String _category = '';
+
+  /// The search term the feed is currently filtered by.
+  String get query => _query;
+
+  /// The barangay the feed is currently filtered by ('' = all barangays).
+  String get barangay => _barangay;
+
+  /// The category the feed is currently filtered by ('' = all categories).
+  String get category => _category;
+
+  /// True when any filter is narrowing the feed — the empty state uses this
+  /// to tell "nothing matches" apart from "nothing has been posted yet".
+  bool get hasFilters =>
+      _query.isNotEmpty || _barangay.isNotEmpty || _category.isNotEmpty;
+
   ListingsProvider(this.api);
 
   List<ListingModel> get offers =>
@@ -38,14 +63,29 @@ class ListingsProvider extends ChangeNotifier {
   List<ListingModel> get needs =>
       listings.where((item) => item.type == 'request').toList();
 
-  Future<void> load({String? query, String? barangay, bool showSpinner = true}) async {
+  Future<void> load({
+    String? query,
+    String? barangay,
+    String? category,
+    bool showSpinner = true,
+  }) async {
+    // Remember the filters that were passed in. A null argument means "keep
+    // what is already applied"; an empty string means "clear this filter".
+    if (query != null) _query = query;
+    if (barangay != null) _barangay = barangay;
+    if (category != null) _category = category;
+
     if (showSpinner && !loading) {
       loading = true;
       notifyListeners();
     }
     var changed = false;
     try {
-      final fresh = (await api.listings(query: query, barangay: barangay))
+      final fresh = (await api.listings(
+        query: _query,
+        barangay: _barangay,
+        category: _category,
+      ))
           .map((item) => ListingModel.fromJson(Map<String, dynamic>.from(item as Map)))
           .toList();
       // Keep the previous list object when the poll returns identical data —
@@ -96,7 +136,8 @@ class ListingsProvider extends ChangeNotifier {
   }
 
   /// Poll the backend so listings stay fresh in real time. Background polls
-  /// skip the loading spinner so the grid is never torn down mid-scroll.
+  /// skip the loading spinner so the grid is never torn down mid-scroll, and
+  /// they re-apply the filters the member is currently looking at.
   void startAutoRefresh({Duration interval = const Duration(seconds: 12)}) {
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(interval, (_) {
@@ -107,6 +148,18 @@ class ListingsProvider extends ChangeNotifier {
   void stopAutoRefresh() {
     _pollTimer?.cancel();
     _pollTimer = null;
+  }
+
+  /// Clear every filter and bring the whole feed back.
+  ///
+  /// The empty state offers this when a search or a chip has narrowed the
+  /// feed down to nothing — a dead end the member can back out of in one
+  /// tap.
+  Future<void> clearFilters() async {
+    _query = '';
+    _barangay = '';
+    _category = '';
+    await load();
   }
 
   /// Create a listing on the backend, then refresh so the feed updates
@@ -124,6 +177,7 @@ class ListingsProvider extends ChangeNotifier {
     double? price,
     bool priceNegotiable = false,
     String? wantedItem,
+    String? quantity,
     double? latitude,
     double? longitude,
     List<File> images = const [],
@@ -133,15 +187,16 @@ class ListingsProvider extends ChangeNotifier {
       title: InputSanitizer.text(title, max: 120),
       type: type,
       description: InputSanitizer.text(description, max: 2000),
-      category: category,
-      condition: condition,
+      category: InputSanitizer.text(category, max: 60),
+      condition: InputSanitizer.text(condition, max: 60),
       location: InputSanitizer.clean(location),
       barangay: barangay,
       purokSitio: InputSanitizer.clean(purokSitio),
       compensationType: compensationType,
       price: price,
-      // Paid-only: the seller welcomes a counter-offer.
-      priceNegotiable: priceNegotiable,
+      // Paid-only: the seller welcomes a counter-offer. A NEED's price is a
+      // budget ceiling, which is not negotiable against itself.
+      priceNegotiable: type != 'request' && priceNegotiable,
       // Exact pin, when the poster dropped one.
       latitude: latitude,
       longitude: longitude,
@@ -149,6 +204,10 @@ class ListingsProvider extends ChangeNotifier {
       // backend nulls it for them regardless.
       wantedItem: compensationType == 'barter' && (wantedItem?.isNotEmpty ?? false)
           ? InputSanitizer.text(wantedItem!, max: 160)
+          : null,
+      // NEED-only: how much is needed ("5 kg of rice").
+      quantity: type == 'request' && (quantity?.isNotEmpty ?? false)
+          ? InputSanitizer.text(quantity!, max: 60)
           : null,
       // Ordered photo gallery; the first becomes the cover.
       images: images,

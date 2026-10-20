@@ -381,7 +381,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   String _emptySubtitle() => switch (_myFilter) {
         'active' =>
-          'Tap "+ Post a Resource" on the home tab to share your first item.',
+          'Tap "Post a Resource" on the home tab to share your first item.',
         'paused' => 'Paused listings are hidden from the feed but kept here.',
         'traded' => 'Mark a listing as traded once a swap is done.',
         'archived' => 'Archived listings rest here until you restore them.',

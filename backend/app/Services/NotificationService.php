@@ -28,6 +28,14 @@ class NotificationService
     public const CATEGORY_ACCOUNT = 'account';
 
     /**
+     * "A new version of the app is available".
+     *
+     * Its own category so a member can silence release pings at the OS level
+     * without also muting barangay announcements, and the other way round.
+     */
+    public const CATEGORY_UPDATES = 'updates';
+
+    /**
      * Android notification channel per category.
      *
      * These ids must stay in step with the channels the app creates in
@@ -39,6 +47,7 @@ class NotificationService
         self::CATEGORY_EXCHANGES => 'cblrep_exchanges',
         self::CATEGORY_ANNOUNCEMENTS => 'cblrep_announcements',
         self::CATEGORY_ACCOUNT => 'cblrep_account',
+        self::CATEGORY_UPDATES => 'cblrep_updates',
     ];
 
     public function __construct(private PushService $push) {}

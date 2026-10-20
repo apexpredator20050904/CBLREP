@@ -110,6 +110,7 @@ class Resource extends Model
         // negotiate) in ListingController.
         'price_negotiable',
         'condition',
+        'quantity',
         'title',
         'description',
         'location',
@@ -149,6 +150,53 @@ class Resource extends Model
     public function compensationLabel(): string
     {
         return self::COMPENSATION_LABELS[$this->compensationType()] ?? 'BARTER';
+    }
+
+    // ------------------------------------------------------------------
+    // Direction: OFFER vs NEED
+    // ------------------------------------------------------------------
+
+    /**
+     * Is this listing a NEED ("I am looking for something") rather than an
+     * OFFER ("I have something to share")?
+     *
+     * The two directions share every column but read them from opposite ends:
+     * `price` is the asking price on an offer and the poster's budget ceiling
+     * on a need; `wanted_item` is what the owner wants back on an offer and
+     * what the poster can trade on a need; `condition` describes the item on
+     * an offer and states what the poster can accept on a need.
+     *
+     * Because of that, clients must never guess the reading from the raw
+     * value — `toFrontendListing()` publishes the matching `*_role` fields so
+     * the app, the admin console and Analytics all say the same thing.
+     */
+    public function isNeed(): bool
+    {
+        return str_contains(strtolower((string) ($this->type ?? 'offer')), 'request');
+    }
+
+    /** The price column's role: the poster's budget ceiling, or the asking price. */
+    public function priceRole(): string
+    {
+        return $this->isNeed() ? 'budget' : 'asking';
+    }
+
+    /** The return side's role: what the poster can trade, or what the owner wants. */
+    public function wantedItemRole(): string
+    {
+        return $this->isNeed() ? 'offers_in_return' : 'wants_in_return';
+    }
+
+    /** The condition column's role: an acceptable condition, or the item's state. */
+    public function conditionRole(): string
+    {
+        return $this->isNeed() ? 'acceptable_condition' : 'item_state';
+    }
+
+    /** The gallery's role: reference pictures of what is wanted, or photos of the item. */
+    public function imagesRole(): string
+    {
+        return $this->isNeed() ? 'reference_photos' : 'item_photos';
     }
 
     // ------------------------------------------------------------------
@@ -240,12 +288,17 @@ class Resource extends Model
     /**
      * Whether the owner will consider a counter-offer.
      *
-     * Meaningful only for a paid listing — free/barter always report false so
+     * Meaningful only for a paid OFFER — free/barter always report false so
      * the UI never invites negotiation on something that carries no price.
+     *
+     * A paid NEED is excluded too: its price is the poster's own budget
+     * ceiling, and a ceiling is not something you negotiate against yourself.
      */
     public function displayNegotiable(): bool
     {
-        return $this->compensationType() === self::PAID && (bool) $this->price_negotiable;
+        return $this->compensationType() === self::PAID
+            && ! $this->isNeed()
+            && (bool) $this->price_negotiable;
     }
 
     // ------------------------------------------------------------------
@@ -287,10 +340,21 @@ class Resource extends Model
             'wanted_item' => $this->compensationType() === self::BARTER
                 ? $this->wanted_item
                 : null,
+            // Which reading applies to the shared columns. A NEED reads them
+            // from the other end (budget, not asking price; the poster's
+            // offer in return, not the owner's wish), so every client renders
+            // from these instead of guessing from the raw value.
+            'price_role' => $this->priceRole(),
+            'wanted_item_role' => $this->wantedItemRole(),
+            'condition_role' => $this->conditionRole(),
+            'images_role' => $this->imagesRole(),
             'price' => $this->displayPrice(),
             // True only for a paid listing whose owner welcomes an offer.
             'price_negotiable' => $this->displayNegotiable(),
             'condition' => $this->condition ?? 'Good',
+            // How much is needed. Only meaningful on a NEED ("5 kg of rice");
+            // cleared for offers, which are one thing the member already owns.
+            'quantity' => $this->isNeed() ? $this->quantity : null,
             'location' => $this->location ?? '',
             'barangay' => $this->barangay,
             'purok_sitio' => $this->purok_sitio,

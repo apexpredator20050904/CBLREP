@@ -16,8 +16,21 @@ import '../widgets/post_limit_dialog.dart';
 import 'verification_screen.dart';
 
 /// Post Listing — offers & needs with category, condition, barangay and
-/// camera/gallery photo upload. CBLREP runs on direct bartering only, so a
-/// listing carries no exchange-mode field.
+/// camera/gallery photo upload.
+///
+/// An OFFER and a NEED are the same listing seen from opposite ends, so the
+/// form changes with the direction:
+///
+///   OFFER ("I have it")  → you share something. The price is what you ask,
+///                          the condition is the item's state, the photos are
+///                          of the item, and Free is a legal choice (a gift).
+///   NEED  ("I want it")  → you are looking for something. The price is your
+///                          budget ceiling, the condition is what you can
+///                          accept, the photos are references of the thing you
+///                          want, Free is NOT a legal choice (a need is
+///                          answered with a trade or a payment — asking for
+///                          something free is what posting an offer is for),
+///                          and you can say how much you need.
 class CreateListingScreen extends StatefulWidget {
   const CreateListingScreen({super.key});
   @override
@@ -31,6 +44,8 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
   // The return side of a barter — what the member hopes to receive. Ignored
   // for free/paid listings, which have no return side.
   final wanted = TextEditingController();
+  // How much is needed. Only meaningful on a NEED ("5 kg of rice").
+  final quantity = TextEditingController();
   String category = 'Tools';
   String type = 'offer', condition = 'Good', barangay = trinidadBarangays.first;
   // Flexible compensation: free | barter | paid.
@@ -43,6 +58,9 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
   // Ordered photo gallery, capped at the backend's six. The first is the cover.
   final List<File> images = [];
   static const maxPhotos = 6;
+  // A NEED has no item to photograph, so only a couple of reference pictures
+  // make sense ("the chair I am looking for").
+  static const maxReferencePhotos = 2;
   bool saving = false;
 
   // Local draft bookkeeping. `_posted`/`_discarded` stop the dispose-time save
@@ -61,11 +79,52 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
 
   static const categories = ['Tools', 'Food', 'Clothing', 'Furniture', 'Electronics', 'Books', 'Skills', 'Services', 'Plants', 'Other'];
 
+  /// The condition vocabulary depends on the direction. On an offer it states
+  /// the item's state; on a need the poster cannot rate something they do not
+  /// own, so it states what they are willing to accept.
+  static const _offerConditions = ['New', 'Good', 'Needs repair'];
+  static const _needConditions = ['Any', 'Like new', 'Working'];
+
   static const _compensationCopy = {
     'free': 'Free sharing — you are giving this away at no cost.',
     'barter': 'Barter — a neighbour offers an item or skill in return.',
     'paid': 'Paid — set a price and neighbours can inquire to buy.',
   };
+
+  /// The need variants of the same three explanations.
+  static const _needCompensationCopy = {
+    'barter': 'Barter — you can trade an item or skill for what you need.',
+    'paid': 'Paid — set a budget and neighbours can offer to supply it.',
+  };
+
+  /// True when the form is composing a NEED rather than an OFFER.
+  bool get _isNeed => type == 'request';
+
+  /// The condition options that apply to the current direction.
+  List<String> get _conditions => _isNeed ? _needConditions : _offerConditions;
+
+  /// The photo cap for the current direction: a need has no item to shoot, so
+  /// only a couple of reference pictures make sense.
+  int get _photoCap => _isNeed ? maxReferencePhotos : maxPhotos;
+
+  /// Switch the direction, keeping the form consistent with it.
+  ///
+  /// A NEED cannot be free (the backend rejects that cell of the matrix), so
+  /// flipping to "Need" while "Free" is selected moves the member to Barter
+  /// rather than leaving a form that would 422 on submit.
+  void _setType(String next) {
+    setState(() {
+      type = next;
+      if (_isNeed) {
+        if (compensation == 'free') compensation = 'barter';
+        if (!_needConditions.contains(condition)) condition = 'Any';
+        priceNegotiable = false;
+      } else if (!_offerConditions.contains(condition)) {
+        condition = 'Good';
+      }
+    });
+    _onFieldChanged();
+  }
 
   @override
   void initState() {
@@ -138,9 +197,12 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
       final t = asString(draft['type']);
       if (t == 'offer' || t == 'request') type = t;
       final cond = asString(draft['condition']);
-      if (['New', 'Good', 'Needs repair'].contains(cond)) condition = cond;
+      if (_conditions.contains(cond)) condition = cond;
       final comp = asString(draft['compensation']);
       if (['free', 'barter', 'paid'].contains(comp)) compensation = comp;
+      // A need cannot be free — an old draft may predate that rule.
+      if (type == 'request' && compensation == 'free') compensation = 'barter';
+      quantity.text = asString(draft['quantity']);
       priceNegotiable = draft['priceNegotiable'] == true;
       final lat = draft['latitude'];
       final lng = draft['longitude'];
@@ -206,6 +268,7 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
         blank(purok.text) &&
         blank(price.text) &&
         blank(wanted.text) &&
+        blank(quantity.text) &&
         images.isEmpty &&
         pinLocation == null;
     if (empty) {
@@ -217,6 +280,7 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
       'description': description.text,
       'wanted': wanted.text,
       'price': price.text,
+      'quantity': quantity.text,
       'purok': purok.text,
       'barangay': barangay,
       'category': category,
@@ -241,6 +305,7 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
       description.clear();
       wanted.clear();
       price.clear();
+      quantity.clear();
       images.clear();
       pinLocation = null;
       priceNegotiable = false;
@@ -255,19 +320,21 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
   }
 
   Future<void> pickImage(ImageSource source) async {
-    if (images.length >= maxPhotos) {
-      Feedback.info(context, 'You can add up to $maxPhotos photos.');
+    if (images.length >= _photoCap) {
+      Feedback.info(context, _isNeed
+          ? 'You can add up to $_photoCap reference photos.'
+          : 'You can add up to $maxPhotos photos.');
       return;
     }
     if (source == ImageSource.camera) {
       final picked = await ImagePicker().pickImage(source: source, imageQuality: 80, maxWidth: 1600);
-      if (picked != null && mounted && images.length < maxPhotos) {
+      if (picked != null && mounted && images.length < _photoCap) {
         _touch(() => images.add(File(picked.path)));
       }
       return;
     }
     // Gallery: multi-select, trimmed so the total never exceeds the cap.
-    final remaining = maxPhotos - images.length;
+    final remaining = _photoCap - images.length;
     final picked = await ImagePicker().pickMultiImage(imageQuality: 80, maxWidth: 1600, limit: remaining);
     if (picked.isEmpty || !mounted) return;
     _touch(() {
@@ -283,7 +350,7 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
       builder: (c) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           ListTile(leading: const Icon(Icons.photo_camera_outlined), title: const Text('Take a photo'), onTap: () { Navigator.pop(c); pickImage(ImageSource.camera); }),
-          ListTile(leading: const Icon(Icons.photo_library_outlined), title: const Text('Choose from gallery'), subtitle: Text('Up to $maxPhotos photos'), onTap: () { Navigator.pop(c); pickImage(ImageSource.gallery); }),
+          ListTile(leading: const Icon(Icons.photo_library_outlined), title: const Text('Choose from gallery'), subtitle: Text(_isNeed ? 'Up to $_photoCap reference photos' : 'Up to $maxPhotos photos'), onTap: () { Navigator.pop(c); pickImage(ImageSource.gallery); }),
           if (images.isNotEmpty) ListTile(leading: const Icon(Icons.delete_outline), title: const Text('Remove all photos'), onTap: () { Navigator.pop(c); _touch(() => images.clear()); }),
         ]),
       ),
@@ -323,8 +390,11 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
             // Only a paid listing carries a price; free/barter send none.
             compensationType: compensation,
             price: compensation == 'paid' ? double.tryParse(price.text.trim()) : null,
-            priceNegotiable: compensation == 'paid' && priceNegotiable,
+            // A need's price is a budget ceiling, so it is never negotiable.
+            priceNegotiable: compensation == 'paid' && !_isNeed && priceNegotiable,
             wantedItem: compensation == 'barter' ? wanted.text.trim() : null,
+            // NEED-only: how much is needed.
+            quantity: _isNeed ? quantity.text.trim() : null,
             // The exact pin, when the poster dropped one. Null keeps the
             // backend's barangay-anchor fallback so the listing still appears
             // on the community map.
@@ -391,12 +461,21 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
           SegmentedButton<String>(
             segments: const [ButtonSegment(value: 'offer', label: Text('Offer'), icon: Icon(Icons.volunteer_activism)), ButtonSegment(value: 'request', label: Text('Need'), icon: Icon(Icons.help_outline))],
             selected: {type},
-            onSelectionChanged: (value) => _touch(() => type = value.first),
+            onSelectionChanged: (value) => _setType(value.first),
+          ),
+          const SizedBox(height: 8),
+          // Say which direction the form is in, so the labels below are never
+          // ambiguous — the two directions read the same fields differently.
+          Text(
+            _isNeed
+                ? 'Posting a NEED — you are looking for this.'
+                : 'Posting an OFFER — you have this to share.',
+            style: TextStyle(fontSize: 11, color: dark ? Colors.white70 : Colors.black54),
           ),
           const SizedBox(height: 12),
-          TextFormField(controller: title, decoration: const InputDecoration(labelText: 'Title'), validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null),
+          TextFormField(controller: title, decoration: InputDecoration(labelText: 'Title', helperText: _isNeed ? 'Name the thing you want, not "looking for".' : null), validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null),
           const SizedBox(height: 12),
-          TextFormField(controller: description, maxLines: 4, decoration: const InputDecoration(labelText: 'Description (what, why, pickup notes)')),
+          TextFormField(controller: description, maxLines: 4, decoration: InputDecoration(labelText: _isNeed ? 'Why do you need it, and by when?' : 'Description (what, why, pickup notes)')),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             initialValue: category,
@@ -415,28 +494,59 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
           const SizedBox(height: 12),
           // How the member wants to share: Free, Barter or Paid. This is the
           // flexible-compensation choice the whole portal is built around.
+          //
+          // A NEED has no "Free" option: asking for something for nothing is
+          // not a want ad — posting it as a Free OFFER is how you give
+          // something away. A need is answered with a trade or a payment.
           SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: 'free', label: Text('Free'), icon: Icon(Icons.card_giftcard)),
-              ButtonSegment(value: 'barter', label: Text('Barter'), icon: Icon(Icons.swap_horiz)),
-              ButtonSegment(value: 'paid', label: Text('Paid'), icon: Icon(Icons.sell_outlined)),
-            ],
+            segments: _isNeed
+                ? const [
+                    ButtonSegment(value: 'barter', label: Text('Barter'), icon: Icon(Icons.swap_horiz)),
+                    ButtonSegment(value: 'paid', label: Text('Paid'), icon: Icon(Icons.sell_outlined)),
+                  ]
+                : const [
+                    ButtonSegment(value: 'free', label: Text('Free'), icon: Icon(Icons.card_giftcard)),
+                    ButtonSegment(value: 'barter', label: Text('Barter'), icon: Icon(Icons.swap_horiz)),
+                    ButtonSegment(value: 'paid', label: Text('Paid'), icon: Icon(Icons.sell_outlined)),
+                  ],
             selected: {compensation},
             onSelectionChanged: (value) => _touch(() => compensation = value.first),
           ),
           const SizedBox(height: 8),
-          _CompensationNotice(type: compensation, copy: _compensationCopy[compensation]!),
-          // Barter only: the poster's own return wish. Naming it up front is
-          // what lets a neighbour offer the right thing instead of guessing —
-          // the mirror of the "Make a trade offer" sheet on the other side.
+          _CompensationNotice(
+            type: compensation,
+            copy: (_isNeed ? _needCompensationCopy : _compensationCopy)[compensation]!,
+          ),
+          // NEED-only: how much is needed. A want ad that says "rice" but not
+          // "5 kg" leaves the neighbour guessing — and bulk needs are the
+          // normal case in a barangay.
+          if (_isNeed) ...[
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: quantity,
+              maxLength: 60,
+              decoration: const InputDecoration(
+                labelText: 'How much do you need? (optional)',
+                helperText: 'e.g. 5 kg, 2 sacks, one bundle',
+              ),
+            ),
+          ],
+          // Barter only: the return side. On an offer it is what the owner
+          // hopes to receive; on a need it is what the poster can trade —
+          // naming it up front is what lets a neighbour offer the right
+          // thing instead of guessing.
           if (compensation == 'barter') ...[
             const SizedBox(height: 12),
             TextFormField(
               controller: wanted,
               maxLength: 160,
-              decoration: const InputDecoration(
-                labelText: 'In return, I would like (optional)',
-                helperText: 'e.g. 5 kg of rice, or an hour of plumbing help',
+              decoration: InputDecoration(
+                labelText: _isNeed
+                    ? 'In return, I can offer (optional)'
+                    : 'In return, I would like (optional)',
+                helperText: _isNeed
+                    ? 'e.g. 2 hours of childcare, or a bag of rice'
+                    : 'e.g. 5 kg of rice, or an hour of plumbing help',
               ),
             ),
           ],
@@ -445,7 +555,13 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
             TextFormField(
               controller: price,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Price (₱)', prefixText: '₱ '),
+              decoration: InputDecoration(
+                labelText: _isNeed ? 'I can pay up to (₱)' : 'Price (₱)',
+                prefixText: '₱ ',
+                helperText: _isNeed
+                    ? 'Your budget ceiling — what you are willing to pay for this.'
+                    : null,
+              ),
               validator: (v) {
                 if (compensation != 'paid') return null;
                 final parsed = double.tryParse((v ?? '').trim());
@@ -454,19 +570,23 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
                 return null;
               },
             ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: priceNegotiable,
-              onChanged: (value) => _touch(() => priceNegotiable = value),
-              title: const Text('Price is negotiable', style: TextStyle(fontSize: 13)),
-              subtitle: const Text('Let buyers send a counter-offer in chat.', style: TextStyle(fontSize: 11)),
-            ),
+            // "Negotiable" belongs to a seller who may take less than the
+            // asking price. A budget ceiling is the poster's own limit, so it
+            // is not negotiable against itself.
+            if (!_isNeed)
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: priceNegotiable,
+                onChanged: (value) => _touch(() => priceNegotiable = value),
+                title: const Text('Price is negotiable', style: TextStyle(fontSize: 13)),
+                subtitle: const Text('Let buyers send a counter-offer in chat.', style: TextStyle(fontSize: 11)),
+              ),
           ],
           const SizedBox(height: 12),
           DropdownButtonFormField(
-            initialValue: condition,
-            decoration: const InputDecoration(labelText: 'Condition'),
-            items: const ['New', 'Good', 'Needs repair'].map((value) => DropdownMenuItem(value: value, child: Text(value))).toList(),
+            initialValue: _conditions.contains(condition) ? condition : _conditions.first,
+            decoration: InputDecoration(labelText: _isNeed ? 'Condition I can accept' : 'Condition'),
+            items: _conditions.map((value) => DropdownMenuItem(value: value, child: Text(value))).toList(),
             onChanged: (value) => _touch(() => condition = value!),
           ),
           const SizedBox(height: 12),
@@ -498,10 +618,13 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
           ),
           const SizedBox(height: 12),
           // Photo gallery: up to six unordered thumbnails plus an add tile. The
-          // first photo is the cover, so the row is ordered and removable.
+          // first photo is the cover, so the row is ordered and removable. A
+          // NEED has no item to photograph, so it carries reference pictures
+          // of the thing wanted instead.
           _PhotoGallery(
             images: images,
-            maxPhotos: maxPhotos,
+            maxPhotos: _photoCap,
+            label: _isNeed ? 'Reference photos' : 'Photos',
             dark: dark,
             onAdd: _photoSheet,
             onRemove: (index) => _touch(() => images.removeAt(index)),
@@ -724,12 +847,14 @@ class _LocationPinCard extends StatelessWidget {
 class _PhotoGallery extends StatelessWidget {
   final List<File> images;
   final int maxPhotos;
+  final String label;
   final bool dark;
   final VoidCallback onAdd;
   final ValueChanged<int> onRemove;
   const _PhotoGallery({
     required this.images,
     required this.maxPhotos,
+    this.label = 'Photos',
     required this.dark,
     required this.onAdd,
     required this.onRemove,
@@ -739,11 +864,14 @@ class _PhotoGallery extends StatelessWidget {
   Widget build(BuildContext context) {
     final surface = dark ? CblrepColors.fieldGreen : const Color(0xFFEFE9DA);
     final border = dark ? Colors.white12 : Colors.black12;
+    final isReference = label == 'Reference photos';
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(
         images.isEmpty
-            ? 'Add item photos (optional)'
-            : 'Photos (${images.length}/$maxPhotos) — first is the cover',
+            ? (isReference
+                ? 'Add a reference photo (optional) — the kind of thing you want'
+                : 'Add item photos (optional)')
+            : '$label (${images.length}/$maxPhotos) — first is the cover',
         style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
       ),
       const SizedBox(height: 8),

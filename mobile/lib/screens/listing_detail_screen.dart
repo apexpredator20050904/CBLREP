@@ -8,6 +8,9 @@ import '../models/models.dart';
 import '../providers/auth_provider.dart';
 import '../providers/listings_provider.dart';
 import '../theme/cblrep_theme.dart';
+import '../widgets/member_profile_sheet.dart';
+import '../widgets/report_sheet.dart';
+import '../widgets/trade_offer_sheet.dart';
 import '../widgets/user_avatar.dart';
 import '../widgets/verified_badge.dart';
 import 'chat_screen.dart';
@@ -176,14 +179,26 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
 
   /// A ready-made first message tailored to how the owner wants to share, so a
   /// member can start talking in one tap.
-  String _suggestedOpener(ListingModel listing) =>
-      switch (listing.compensationType) {
-        'free' => 'Hi! Is "${listing.title}" still available for free? I can pick it up.',
-        'paid' => 'Hi! I am interested in "${listing.title}"'
-            '${listing.price != null ? ' (listed at ₱${listing.price!.toStringAsFixed(listing.price == listing.price!.roundToDouble() ? 0 : 2)})' : ''}. '
-            'Is the price negotiable?',
-        _ => 'Hi! I would like to trade for "${listing.title}". What would you like in return?',
+  ///
+  /// The direction changes the wording: on an OFFER the reader is the
+  /// demander, on a NEED the reader is the supplier.
+  String _suggestedOpener(ListingModel listing) {
+    if (listing.isNeed) {
+      return switch (listing.compensationType) {
+        'paid' => 'Hi! I have "${listing.title}"${listing.quantity != null && listing.quantity!.isNotEmpty ? ' (${listing.quantity})' : ''}. '
+            'Can I supply it to you?',
+        _ => 'Hi! I have "${listing.title}"${listing.quantity != null && listing.quantity!.isNotEmpty ? ' (${listing.quantity})' : ''}. '
+            'Is that what you are looking for?',
       };
+    }
+    return switch (listing.compensationType) {
+      'free' => 'Hi! Is "${listing.title}" still available for free? I can pick it up.',
+      'paid' => 'Hi! I am interested in "${listing.title}"'
+          '${listing.price != null ? ' (listed at ₱${listing.price!.toStringAsFixed(listing.price == listing.price!.roundToDouble() ? 0 : 2)})' : ''}. '
+          'Is the price negotiable?',
+      _ => 'Hi! I would like to trade for "${listing.title}". What would you like in return?',
+    };
+  }
 
   /// Open the structured barter offer: choose or describe what you give in
   /// return, confirm the handover location, and send a proposal the owner can
@@ -192,6 +207,10 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
   /// This is deliberately *not* the chat — a recorded, two-sided offer is a
   /// different real-world act from haggling in messages, and only barter
   /// listings have a return side to offer.
+  ///
+  /// On a NEED the same sheet is used with the roles mirrored: the reader is
+  /// the supplier ("I have what you need") and the field asks what they would
+  /// like in return.
   Future<void> _openTradeOffer() async {
     if (widget.listing.ownerId <= 0) {
       if (mounted) Feedback.info(context, 'Owner chat is unavailable for this listing.');
@@ -199,15 +218,42 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     }
     if (!await _ensureSignedIn('send a trade offer for this listing')) return;
     if (!mounted) return;
-    final sent = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _TradeOfferSheet(listing: widget.listing),
-    );
-    if (sent == true && mounted) {
-      Feedback.success(context, 'Trade offer sent. Track it in Exchanges.');
+    final sent = await showTradeOfferSheet(context, widget.listing);
+    if (sent && mounted) {
+      Feedback.success(
+        context,
+        widget.listing.isNeed
+            ? 'Sent. The poster will review what you can bring.'
+            : 'Trade offer sent. Track it in Exchanges.',
+      );
     }
+  }
+
+  /// Paid NEED: the neighbour supplies the thing the poster wants, so they
+  /// are the one naming a price. The quote goes into the listing's own thread
+  /// as the opening message, because a payment is a conversation rather than
+  /// a recorded two-sided exchange.
+  Future<void> _offerToSupply() async {
+    if (widget.listing.ownerId <= 0) {
+      if (mounted) Feedback.info(context, 'Owner chat is unavailable for this listing.');
+      return;
+    }
+    if (!await _ensureSignedIn('offer to supply this request')) return;
+    if (!mounted) return;
+    final budget = widget.listing.price;
+    final amount = await showDialog<double>(
+      context: context,
+      builder: (_) => _OfferDialog(listedPrice: budget, isSupplyQuote: true),
+    );
+    if (amount == null || !mounted) return;
+    final formatted = amount == amount.roundToDouble()
+        ? amount.toStringAsFixed(0)
+        : amount.toStringAsFixed(2);
+    await _contactOwner(
+      opener: 'Hi! I have "${widget.listing.title}"'
+          '${widget.listing.quantity != null && widget.listing.quantity!.isNotEmpty ? ' (${widget.listing.quantity})' : ''}. '
+          'I can supply it for ₱$formatted. Would that work for you?',
+    );
   }
 
   /// Paid + negotiable: let a buyer name a price without haggling blind.
@@ -236,12 +282,72 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     );
   }
 
-  /// Primary CTA wording depends on how the owner wants to share.
-  String get _inquireLabel => switch (widget.listing.compensationType) {
-        'free' => 'Message to claim',
-        'paid' => 'Message / Buy',
-        _ => 'Message / Inquire',
-      };
+  /// Primary CTA wording depends on how the owner wants to share, and on
+  /// which side of the exchange the reader is standing.
+  String get _inquireLabel {
+    if (widget.listing.isNeed) {
+      return widget.listing.isPaid ? 'Message / Supply' : 'Message / Ask';
+    }
+    return switch (widget.listing.compensationType) {
+      'free' => 'Message to claim',
+      'paid' => 'Message / Buy',
+      _ => 'Message / Inquire',
+    };
+  }
+
+  /// Report the posting from the details screen's three-dot menu.
+  Future<void> _reportListing() async {
+    final sent = await showReportSheet(
+      context,
+      reportableType: ReportTarget.listing,
+      reportableId: widget.listing.id,
+      subjectName: widget.listing.title,
+    );
+    if (sent && mounted) {
+      Feedback.success(
+        context,
+        'Thank you for helping keep our community safe. '
+        'Our team will review this listing.',
+      );
+    }
+  }
+
+  /// Report the owner from the details screen's three-dot menu.
+  Future<void> _reportOwner() async {
+    final listing = widget.listing;
+    if (listing.ownerId <= 0) {
+      if (mounted) Feedback.info(context, 'This listing has no owner to report.');
+      return;
+    }
+    final sent = await showReportSheet(
+      context,
+      reportableType: ReportTarget.user,
+      reportableId: listing.ownerId,
+      subjectName: listing.owner,
+    );
+    if (sent && mounted) {
+      Feedback.success(
+        context,
+        'Thank you for helping keep our community safe. '
+        'Our team will review this account.',
+      );
+    }
+  }
+
+  /// Open the owner's profile — their name, photo, verification status and
+  /// the action to report them.
+  Future<void> _openOwner() async {
+    final listing = widget.listing;
+    final myId = context.read<AuthProvider>().user?.id;
+    await showMemberProfileSheet(
+      context,
+      name: listing.owner,
+      avatarUrl: listing.ownerAvatarUrl,
+      verified: listing.ownerVerified,
+      userId: listing.ownerId,
+      canReport: myId == null || myId != listing.ownerId,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -256,7 +362,66 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     final isOwner = myId != null && listing.ownerId == myId;
     return Scaffold(
       backgroundColor: dark ? CblrepColors.deepForest : null,
-      appBar: AppBar(title: const Text('Item details', style: TextStyle(fontSize: 16))),
+      appBar: AppBar(
+        title: const Text('Item details', style: TextStyle(fontSize: 16)),
+        // The three-dot menu: report the posting, and report the owner.
+        actions: [
+          PopupMenuButton<String>(
+            tooltip: 'More actions',
+            icon: Icon(Icons.more_vert, size: 20, color: dark ? Colors.white70 : null),
+            onSelected: (value) {
+              if (value == 'report_listing') _reportListing();
+              if (value == 'report_user') _reportOwner();
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'report_listing',
+                enabled: !isOwner,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.report_gmailerrorred_outlined,
+                      size: 18,
+                      color: isOwner ? Colors.black26 : CblrepColors.dangerRed,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Report posting',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isOwner ? Colors.black26 : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'report_user',
+                enabled: !isOwner && listing.ownerId > 0,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.person_off_outlined,
+                      size: 18,
+                      color: (isOwner || listing.ownerId <= 0)
+                          ? Colors.black26
+                          : CblrepColors.dangerRed,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Report user',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: (isOwner || listing.ownerId <= 0) ? Colors.black26 : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         _ListingGallery(
           images: listing.imageUrls.isNotEmpty
@@ -294,9 +459,20 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
               ),
             ),
             const SizedBox(height: 6),
-            Text('${listing.category} · ${listing.condition}', style: TextStyle(fontSize: 12, color: dark ? Colors.white70 : Colors.black54)),
+            Text(
+              listing.conditionIsRequirement
+                  ? '${listing.category} · Accepts: ${listing.condition}'
+                  : '${listing.category} · ${listing.condition}',
+              style: TextStyle(fontSize: 12, color: dark ? Colors.white70 : Colors.black54),
+            ),
             if (listing.isPaid && listing.price != null) ...[
               const SizedBox(height: 6),
+              // On a NEED the figure is the poster's budget ceiling, not a
+              // price they are asking — the label says so, because a reader
+              // who reads "₱300" on a want ad would think it is for sale.
+              if (listing.isBudget)
+                Text('Budget up to',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: CblrepColors.compPaid)),
               Row(children: [
                 Text('₱${listing.price!.toStringAsFixed(listing.price == listing.price!.roundToDouble() ? 0 : 2)}',
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: CblrepColors.compPaid)),
@@ -316,11 +492,22 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
             ],
             const SizedBox(height: 8),
             Text(listing.description.isEmpty ? 'No description provided.' : listing.description, style: TextStyle(fontSize: 13, color: dark ? Colors.white : Colors.black87)),
+            // How much is needed — a NEED-only line ("I need 5 kg of rice").
+            if (listing.isNeed && (listing.quantity ?? '').isNotEmpty) ...[
+              const SizedBox(height: 10),
+              _row(Icons.scale_outlined, listing.quantity!, label: 'How much is needed'),
+            ],
             // The return side of a barter, spelled out so a member knows what
             // the owner will actually trade for before they offer anything.
+            // On a NEED the same line reads the other way round: it is what
+            // the poster can trade for what you bring.
             if (listing.isBarter && listing.hasWantedItem) ...[
               const SizedBox(height: 10),
-              _row(Icons.swap_horiz, listing.wantedItem!, label: 'Wants in return'),
+              _row(
+                Icons.swap_horiz,
+                listing.wantedItem!,
+                label: listing.wantedIsOffer ? 'Can offer in return' : 'Wants in return',
+              ),
             ],
             const Divider(height: 24),
             // Hyper-local context: the exact barangay + purok/sitio the item
@@ -348,14 +535,21 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                     Text('Posted by', style: TextStyle(fontSize: 12, color: rowMuted)),
                     const SizedBox(width: 6),
                     Flexible(
-                      child: Text(
-                        listing.owner,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: rowDark ? Colors.white : Colors.black87,
+                      child: InkWell(
+                        onTap: _openOwner,
+                        borderRadius: BorderRadius.circular(4),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Text(
+                            listing.owner,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: rowDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -390,6 +584,11 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
           // Barter only: a recorded, two-sided offer is a different act from
           // chatting, so it gets its own CTA. Free/paid listings have no
           // return side, so this is omitted rather than shown disabled.
+          //
+          // The wording follows the direction. On an OFFER the neighbour is
+          // the demander ("make a trade offer"); on a NEED they are the
+          // SUPPLIER ("I have this") — offering a trade FOR the wanted item
+          // would be backwards.
           if (listing.isBarter) ...[
             const SizedBox(height: 8),
             SizedBox(
@@ -397,8 +596,11 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
               width: double.infinity,
               child: OutlinedButton.icon(
                 onPressed: _openTradeOffer,
-                icon: const Icon(Icons.swap_horiz, size: 18),
-                label: const Text('Make a trade offer'),
+                icon: Icon(
+                  need ? Icons.inventory_2_outlined : Icons.swap_horiz,
+                  size: 18,
+                ),
+                label: Text(need ? 'I have this' : 'Make a trade offer'),
               ),
             ),
           ],
@@ -412,6 +614,23 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                 onPressed: _makeOffer,
                 icon: const Icon(Icons.local_offer_outlined, size: 18),
                 label: const Text('Make an offer'),
+              ),
+            ),
+          ],
+          // Paid NEED: the neighbour is the seller here — they have the thing
+          // the poster is looking for. A payment has no "return side", so it
+          // is not a recorded exchange: it is a quote, sent as the opening
+          // message of the listing's own thread, exactly like a counter-offer
+          // on a priced sale.
+          if (need && listing.isPaid) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 44,
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _offerToSupply,
+                icon: const Icon(Icons.local_shipping_outlined, size: 18),
+                label: const Text('I can supply it'),
               ),
             ),
           ],
@@ -919,7 +1138,11 @@ class _TradeOfferSheetState extends State<_TradeOfferSheet> {
 /// the same listing-scoped thread as every other inquiry.
 class _OfferDialog extends StatefulWidget {
   final double? listedPrice;
-  const _OfferDialog({this.listedPrice});
+
+  /// True when the reader is quoting a price for supplying a NEED, rather
+  /// /// than countering a seller's asking price.
+  final bool isSupplyQuote;
+  const _OfferDialog({this.listedPrice, this.isSupplyQuote = false});
 
   @override
   State<_OfferDialog> createState() => _OfferDialogState();
@@ -955,7 +1178,7 @@ class _OfferDialogState extends State<_OfferDialog> {
     String money(double v) =>
         '₱${v.toStringAsFixed(v == v.roundToDouble() ? 0 : 2)}';
     return AlertDialog(
-      title: const Text('Make an offer', style: TextStyle(fontSize: 16)),
+      title: Text(widget.isSupplyQuote ? 'Your price' : 'Make an offer', style: TextStyle(fontSize: 16)),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -964,7 +1187,9 @@ class _OfferDialogState extends State<_OfferDialog> {
             Padding(
               padding: const EdgeInsets.only(bottom: 10),
               child: Text(
-                'Listed at ${money(widget.listedPrice!)}. Your offer is sent to the seller as a chat message.',
+                widget.isSupplyQuote
+                    ? 'Their budget is up to ${money(widget.listedPrice!)}. Your price is sent to them as a chat message.'
+                    : 'Listed at ${money(widget.listedPrice!)}. Your offer is sent to the seller as a chat message.',
                 style: TextStyle(fontSize: 12, color: Theme.of(context).brightness == Brightness.dark ? Colors.white70 : Colors.black54),
               ),
             ),
@@ -973,7 +1198,7 @@ class _OfferDialogState extends State<_OfferDialog> {
             autofocus: true,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             decoration: InputDecoration(
-              labelText: 'Your offer (₱)',
+              labelText: widget.isSupplyQuote ? 'I can supply it for (₱)' : 'Your offer (₱)',
               prefixText: '₱ ',
               errorText: _error,
             ),
@@ -983,7 +1208,7 @@ class _OfferDialogState extends State<_OfferDialog> {
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-        FilledButton(onPressed: _submit, child: const Text('Send offer')),
+        FilledButton(onPressed: _submit, child: Text(widget.isSupplyQuote ? 'Send quote' : 'Send offer')),
       ],
     );
   }

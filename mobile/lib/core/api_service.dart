@@ -585,10 +585,15 @@ class ApiService {
     }
   }
 
-  Future<List<dynamic>> listings({String? query, String? barangay}) async {
+  Future<List<dynamic>> listings({
+    String? query,
+    String? barangay,
+    String? category,
+  }) async {
     final data = await _request(_dio.get('/listings', queryParameters: {
       if (query != null && query.isNotEmpty) 'q': query,
       if (barangay != null && barangay.isNotEmpty) 'barangay': barangay,
+      if (category != null && category.isNotEmpty) 'category': category,
     })) as Map;
     return List<dynamic>.from(data['listings'] ?? data['data'] ?? const []);
   }
@@ -606,6 +611,7 @@ class ApiService {
     double? price,
     bool priceNegotiable = false,
     String? wantedItem,
+    String? quantity,
     double? latitude,
     double? longitude,
     List<File> images = const [],
@@ -633,9 +639,13 @@ class ApiService {
       // backend's `boolean` rule rejects.
       if (compensationType == 'paid')
         'price_negotiable': priceNegotiable ? 1 : 0,
-      // Barter-only return side ("what I want in return").
+      // Barter-only return side ("what I want in return" on an offer,
+      // "what I can offer in return" on a need).
       if (compensationType == 'barter' && wantedItem != null && wantedItem.trim().isNotEmpty)
         'wanted_item': wantedItem.trim(),
+      // NEED-only: how much is needed ("5 kg of rice").
+      if (type == 'request' && quantity != null && quantity.trim().isNotEmpty)
+        'quantity': quantity.trim(),
     };
     // Build the multipart body by hand so the photo gallery is sent as repeated
     // `images[]` fields, which Laravel parses into the `images` array. The first
@@ -761,17 +771,41 @@ class ApiService {
       Map<String, dynamic>.from(
           await _request(_dio.put('/notifications/$id/read')) as Map);
 
+  /// PUT /notifications/read-all — mark the whole inbox as read.
+  ///
+  /// Only the unread rows are stamped server-side, so a notification that was
+  /// already read keeps the moment it was read.
+  Future<Map<String, dynamic>> markAllNotificationsRead() async =>
+      Map<String, dynamic>.from(
+          await _request(_dio.put('/notifications/read-all')) as Map);
+
+  /// DELETE /notifications/{id} — remove one notification from the inbox.
+  Future<Map<String, dynamic>> deleteNotification(int id) async =>
+      Map<String, dynamic>.from(
+          await _request(_dio.delete('/notifications/$id')) as Map);
+
+  /// DELETE /notifications — clear the whole inbox.
+  Future<Map<String, dynamic>> deleteAllNotifications() async =>
+      Map<String, dynamic>.from(
+          await _request(_dio.delete('/notifications')) as Map);
+
   // ── Push device tokens (FCM) ─────────────────────────────────────────
   /// POST /device-tokens — associate this device's FCM token with the member so
   /// the backend can push alerts even when the app is closed. The server
   /// upserts on the token, so calling this repeatedly is safe.
+  ///
+  /// [buildNumber] is the versionCode the app is running. The server uses it
+  /// to work out who is behind, so a release announcement only reaches the
+  /// members who actually need it.
   Future<void> registerDeviceToken({
     required String token,
     required String platform,
+    int? buildNumber,
   }) async {
     await _request(_dio.post('/device-tokens', data: {
       'token': token,
       'platform': platform,
+      if (buildNumber != null) 'build_number': buildNumber,
     }));
   }
 
@@ -893,6 +927,47 @@ class ApiService {
   Future<Map<String, dynamic>> sendMessage(Map<String, dynamic> payload) async =>
       Map<String, dynamic>.from(await _request(_dio.post('/messages', data: payload)) as Map);
 
+  // ── Community safety reports ─────────────────────────────────────────
+  //
+  // A report is a statement by a named member, so the endpoint is
+  // authenticated and throttled per account on the server.
+
+  /// POST /api/reports — file a report about a listing or a member.
+  ///
+  /// [reportableType] is 'listing' or 'user' (see `ReportTarget`); the
+  /// backend rejects anything else with a 422. The returned map carries the
+  /// created report under `report`, plus a `listing_flagged` flag telling the
+  /// client that the listing has just been pulled out of the feed for a
+  /// moderator to look at.
+  Future<Map<String, dynamic>> submitReport({
+    required String reportableType,
+    required int reportableId,
+    required String reason,
+    String? description,
+  }) async {
+    return Map<String, dynamic>.from(await _request(_dio.post('/reports', data: {
+      'reportable_type': reportableType,
+      'reportable_id': reportableId,
+      'reason': reason,
+      // Only sent when the member actually wrote something — an empty string
+      // would be stored as an empty description rather than a null.
+      if (description != null && description.trim().isNotEmpty)
+        'description': description.trim(),
+    })) as Map);
+  }
+
+  /// GET /api/reports/mine — the member's own report history.
+  ///
+  /// Returns the raw rows, the same shape [listings] hands back, so this
+  /// layer stays free of model imports (models.dart depends on this file).
+  Future<List<Map<String, dynamic>>> myReports() async {
+    final data = await _request(_dio.get('/reports/mine')) as Map;
+    final rows = List<dynamic>.from(data['reports'] ?? const []);
+    return rows
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
   Future<Map<String, dynamic>> platformStatus() async =>
       Map<String, dynamic>.from(await _request(_dio.get('/platform/status')) as Map);
 
@@ -900,4 +975,18 @@ class ApiService {
   /// Public endpoint — no token required.
   Future<Map<String, dynamic>> appVersion() async =>
       Map<String, dynamic>.from(await _request(_dio.get('/app-version')) as Map);
+
+  /// GET /api/page/{slug} — one published municipal content page.
+  ///
+  /// Public endpoint — no token required. The backend only serves rows with
+  /// `status = published AND published_at IS NOT NULL`, so a draft or an
+  /// unknown slug answers 404 and surfaces here as [ApiException]; the two
+  /// cases are deliberately indistinguishable to the client. This is the same
+  /// endpoint the admin console's public /page/:slug web route consumes.
+  Future<Map<String, dynamic>> fetchPage(String slug) async {
+    final data = Map<String, dynamic>.from(
+      await _request(_dio.get('/page/${Uri.encodeComponent(slug)}')) as Map,
+    );
+    return Map<String, dynamic>.from(data['page'] as Map);
+  }
 }

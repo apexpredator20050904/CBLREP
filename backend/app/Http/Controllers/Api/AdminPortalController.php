@@ -433,11 +433,28 @@ class AdminPortalController extends Controller
             'id' => $r->id,
             'title' => $r->title,
             'name' => $r->title,               // AdminMapPage reads r.name
-            'type' => ucfirst($r->type ?? 'offer'),
+            // The console's Type column and its filter both work off this
+            // value, so it has to be the word the filter offers: "Request"
+            // never matched the "Need" option, and a need could not be
+            // filtered at all.
+            'type' => $r->isNeed() ? 'Need' : 'Offer',
             'category' => $r->category?->name ?? 'Tools',
             'compensation_type' => $r->compensationType(),
             'compensation_label' => $r->compensationLabel(),
             'price' => $r->displayPrice(),
+            // Which reading applies to the shared columns. On a NEED the price
+            // is the poster's budget ceiling and the wanted item is what the
+            // poster can trade — without these the panel would read a need's
+            // ₱300 as a selling price.
+            'price_role' => $r->priceRole(),
+            'wanted_item_role' => $r->wantedItemRole(),
+            'condition_role' => $r->conditionRole(),
+            'images_role' => $r->imagesRole(),
+            // The return side of a barter, and how much a need asks for.
+            'wanted_item' => $r->compensationType() === Resource::BARTER
+                ? $r->wanted_item
+                : null,
+            'quantity' => $r->isNeed() ? $r->quantity : null,
             'exchange_type' => $r->exchange_type ?? 'Lend',
             'owner' => $r->user?->name ?? 'Member',
             'user' => ['id' => $r->user?->id, 'name' => $r->user?->name ?? 'Member'],
@@ -758,67 +775,84 @@ class AdminPortalController extends Controller
         // Both listings and both parties eager-loaded. Without this the table
         // fires six queries per row once the offered side is rendered.
         $query = Exchange::with([
-            'resource', 'offeredResource', 'provider', 'receiver',
+            'resource', 'resource.user', 'offeredResource', 'provider', 'receiver',
         ])->latest();
 
         if ($mappedStatus = $statusMap[$statusFilter] ?? null) {
             $query->where('status', $mappedStatus);
         }
 
-        $rows = $query->get()->map(fn (Exchange $e) => [
-            'id' => $e->id,
-            'transaction_id' => 'EX-'.str_pad((string) $e->id, 5, '0', STR_PAD_LEFT),
+        $rows = $query->get()->map(function (Exchange $e) {
+            // The roles swap with the direction: on a trade the proposer is
+            // the demander (receiver) and the owner is the supplier
+            // (provider); on a fulfilment — someone answering a NEED — the
+            // proposer is the supplier and the owner is the demander. The
+            // model knows which, so the panel does not have to guess. Reading
+            // the owner from the fixed provider/receiver mapping would print
+            // the same member in both columns of a supply.
+            $owner = $e->resource?->user;
+            $proposer = $e->proposerId() === $e->provider_id
+                ? $e->provider
+                : $e->receiver;
 
-            // Every row in this table is a direct barter, so the type column
-            // is dropped rather than filtered — there is nothing to switch.
-            'type' => $e->frontendType(),
+            return [
+                'id' => $e->id,
+                'transaction_id' => 'EX-'.str_pad((string) $e->id, 5, '0', STR_PAD_LEFT),
 
-            // Side A — the listing the owner is offering.
-            'item_name' => $e->requestedLabel(),
-            'resource' => $e->requestedLabel(),
-            'resource_id' => $e->resource_id,
+                // Every row in this table is a direct barter, so the type column
+                // is dropped rather than filtered — there is nothing to switch.
+                'type' => $e->frontendType(),
 
-            // Side B — what the proposer puts up. Stated by listing id, by
-            // free text, or both; `offeredLabel()` resolves all three.
-            'offered_label' => $e->offeredLabel(),
-            'offered_resource_id' => $e->offered_resource_id,
-            'offered_item' => $e->offered_item,
+                // Side A — the listing the owner is offering.
+                'item_name' => $e->requestedLabel(),
+                'resource' => $e->requestedLabel(),
+                'resource_id' => $e->resource_id,
 
-            // Structured location of the trade (barangay + purok/sitio).
-            'barangay' => $e->barangay,
-            'purok_sitio' => $e->purok_sitio,
+                // Side B — what the proposer puts up. Stated by listing id, by
+                // free text, or both; `offeredLabel()` resolves all three.
+                'offered_label' => $e->offeredLabel(),
+                'offered_resource_id' => $e->offered_resource_id,
+                'offered_item' => $e->offered_item,
 
-            // Parties. `requester_name`/`owner_name` are the names the table
-            // has always rendered; the proposer_* pair makes the direction of
-            // the proposal explicit for the panel.
-            'requester_name' => $e->receiver?->name ?? 'Member',
-            'owner_name' => $e->provider?->name ?? 'Member',
-            'proposer_name' => $e->receiver?->name ?? 'Member',
-            'proposer_id' => $e->receiver_id,
-            'owner_id' => $e->provider_id,
-            'users' => ($e->provider?->name ?? 'Member').' ↔ '.($e->receiver?->name ?? 'Member'),
+                // Structured location of the trade (barangay + purok/sitio).
+                'barangay' => $e->barangay,
+                'purok_sitio' => $e->purok_sitio,
 
-            'status' => $e->frontendStatus(),
-            'raw_status' => $e->status,
-            'disputed' => false,
+                // Parties. `requester_name`/`owner_name` are the names the table
+                // has always rendered; the proposer_* pair makes the direction of
+                // the proposal explicit for the panel.
+                'requester_name' => $e->receiver?->name ?? 'Member',
+                'owner_name' => $owner?->name ?? 'Member',
+                'proposer_name' => $proposer?->name ?? 'Member',
+                'proposer_id' => $e->proposerId(),
+                'owner_id' => $e->ownerId(),
+                // trade | fulfilment — lets the panel read the row in the right
+                // words ("Supplier / Requester" instead of "Proposer / Owner").
+                'kind' => $e->isNeed() ? 'fulfilment' : 'trade',
+                'users' => ($e->provider?->name ?? 'Member').' ↔ '.($e->receiver?->name ?? 'Member'),
 
-            // ── Dual-confirmation progress (read-only for admins) ──
-            // Completion is member-driven only (both parties confirm via
-            // POST /api/exchanges/{id}/confirm-completion); the console
-            // renders this instead of a "Complete" button.
-            'proposer_confirmed' => (bool) $e->proposer_confirmed,
-            'owner_confirmed' => (bool) $e->owner_confirmed,
-            'proposer_confirmed_at' => $e->proposer_confirmed_at?->toISOString(),
-            'owner_confirmed_at' => $e->owner_confirmed_at?->toISOString(),
-            'confirmation_label' => $e->confirmationLabel(),
+                'status' => $e->frontendStatus(),
+                'raw_status' => $e->status,
+                'disputed' => false,
 
-            // No `due`/`dueCompleted` key: there is no return timer in a
-            // direct barter, and an empty dash column would imply one exists.
-            'updated_at' => $e->updated_at?->toISOString(),
-            'created_at' => $e->created_at?->toISOString(),
-            'date' => $e->created_at?->format('M j, Y') ?? '—',
-            'updated_label' => $e->updated_at?->format('M j, Y') ?? '—',
-        ])->values();
+                // ── Dual-confirmation progress (read-only for admins) ──
+                // Completion is member-driven only (both parties confirm via
+                // POST /api/exchanges/{id}/confirm-completion); the console
+                // renders this instead of a "Complete" button.
+                'proposer_confirmed' => (bool) $e->proposer_confirmed,
+                'owner_confirmed' => (bool) $e->owner_confirmed,
+                'proposer_confirmed_at' => $e->proposer_confirmed_at?->toISOString(),
+                'owner_confirmed_at' => $e->owner_confirmed_at?->toISOString(),
+                'confirmation_label' => $e->confirmationLabel(),
+
+                // No `due`/`dueCompleted` key: there is no return timer in a
+                // direct barter, and an empty dash column would imply one exists.
+                'updated_at' => $e->updated_at?->toISOString(),
+                'created_at' => $e->created_at?->toISOString(),
+                'date' => $e->created_at?->format('M j, Y') ?? '—',
+                'updated_label' => $e->updated_at?->format('M j, Y') ?? '—',
+            ];
+        })->values();
 
         return response()->json([
             'exchanges' => $rows,

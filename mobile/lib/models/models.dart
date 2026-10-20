@@ -139,8 +139,25 @@ class ListingModel {
 
   /// What the owner wants back — the return side of a barter. Null for free
   /// and paid listings, which have no return side.
+  ///
+  /// On a NEED this reads the other way round: it is what the POSTER can
+  /// trade in return. See [wantedItemRole].
   final String? wantedItem;
   final double? price;
+
+  /// Which reading applies to the shared columns. A NEED reads them from the
+  /// other end — its price is the poster's budget ceiling, its wanted item is
+  /// what the poster can offer, its condition is what the poster can accept
+  /// and its photos are references of the thing wanted.
+  ///
+  /// The API publishes these so no client has to guess from the raw value.
+  final String priceRole;
+  final String wantedItemRole;
+  final String conditionRole;
+  final String imagesRole;
+
+  /// How much is needed — "5 kg of rice". Only meaningful on a NEED.
+  final String? quantity;
 
   /// Paid-only: the owner welcomes a counter-offer, so the app shows
   /// "Negotiable" and a "Make an offer" action. Always false for free/barter
@@ -183,6 +200,11 @@ class ListingModel {
     this.compensationLabel = 'BARTER',
     this.wantedItem,
     this.price,
+    this.priceRole = 'asking',
+    this.wantedItemRole = 'wants_in_return',
+    this.conditionRole = 'item_state',
+    this.imagesRole = 'item_photos',
+    this.quantity,
     this.priceNegotiable = false,
     required this.category,
     required this.condition,
@@ -208,6 +230,25 @@ class ListingModel {
   /// True when a buyer should be offered the "Make an offer" route: a priced
   /// sale whose owner welcomes a counter-offer.
   bool get isNegotiable => isPaid && priceNegotiable;
+
+  // ── Direction: OFFER vs NEED ──────────────────────────────────────────
+
+  /// True when this is a NEED ("I am looking for something") rather than an
+  /// OFFER ("I have something to share").
+  bool get isNeed => type == 'request';
+
+  /// The price is the poster's budget ceiling rather than an asking price.
+  bool get isBudget => isNeed && priceRole == 'budget';
+
+  /// The wanted item is what the poster can trade, not what the owner wants.
+  bool get wantedIsOffer => isNeed && wantedItemRole == 'offers_in_return';
+
+  /// The condition states what the poster can accept, not the item's state.
+  bool get conditionIsRequirement =>
+      isNeed && conditionRole == 'acceptable_condition';
+
+  /// The photos are references of the thing wanted, not photos of the item.
+  bool get photosAreReferences => isNeed && imagesRole == 'reference_photos';
 
   // ── Lifecycle status ─────────────────────────────────────────────────
   bool get isActiveStatus => status == 'active';
@@ -250,6 +291,14 @@ class ListingModel {
           'BARTER',
       wantedItem: (json['wanted_item'] as String?)?.trim(),
       price: _asDouble(json['price']),
+      // Which reading applies to the shared columns. Defaults match an OFFER,
+      // so a payload from an older API keeps its old meaning.
+      priceRole: (json['price_role'] as String?) ?? 'asking',
+      wantedItemRole: (json['wanted_item_role'] as String?) ?? 'wants_in_return',
+      conditionRole:
+          (json['condition_role'] as String?) ?? 'item_state',
+      imagesRole: (json['images_role'] as String?) ?? 'item_photos',
+      quantity: (json['quantity'] as String?)?.trim(),
       // Only a paid listing can be negotiable; the server already normalises
       // this, but guard the flag here so a stale/foreign payload cannot make a
       // gift or a trade look open to offers.
@@ -522,5 +571,139 @@ class MessageModel {
         body: (json['body'] ?? json['message'] ?? '') as String,
         sender: (json['senderName'] ?? json['fromEmail'] ?? 'Member') as String,
         sentAt: DateTime.tryParse('${json['created_at'] ?? ''}'),
+      );
+}
+
+/// A published municipal content page served by `GET /api/page/{slug}`.
+///
+/// [body] is HTML authored in the admin console (Notifications → Content), so
+/// the viewer renders it with `flutter_widget_from_html` rather than a plain
+/// Text widget.
+/// Drafts never reach this model — the backend only serves rows with
+/// `status = published AND published_at IS NOT NULL` and 404s everything else.
+class ContentPageModel {
+  final int id;
+  final String title;
+  final String slug;
+  final String body;
+  final DateTime? publishedAt;
+
+  const ContentPageModel({
+    required this.id,
+    required this.title,
+    required this.slug,
+    required this.body,
+    this.publishedAt,
+  });
+
+  factory ContentPageModel.fromJson(Map<String, dynamic> json) => ContentPageModel(
+        id: (json['id'] as num?)?.toInt() ?? 0,
+        title: (json['title'] ?? '') as String,
+        slug: (json['slug'] ?? '') as String,
+        body: (json['body'] ?? '') as String,
+        publishedAt: DateTime.tryParse('${json['published_at'] ?? ''}'),
+      );
+}
+
+/// What a member is reporting.
+///
+/// The backend stores this pair as plain columns (`listing` / `user`) rather
+/// than an Eloquent morph type, so the client speaks exactly the vocabulary
+/// the server stores.
+class ReportTarget {
+  static const String listing = 'listing';
+
+  static const String user = 'user';
+
+  static const List<String> all = [listing, user];
+
+  /// Human label for the sheet title and the confirmation message.
+  static String label(String target) => target == user ? 'account' : 'listing';
+}
+
+/// The closed vocabulary of report reasons.
+///
+/// The backend validates against exactly these values, so a reason can never
+/// be misspelled on the way to the moderation queue.
+class ReportReason {
+  static const String scam = 'scam';
+
+  static const String inappropriateContent = 'inappropriate_content';
+
+  static const String counterfeit = 'counterfeit';
+
+  static const String harassment = 'harassment';
+
+  static const String other = 'other';
+
+  static const List<String> all = [
+    scam,
+    inappropriateContent,
+    counterfeit,
+    harassment,
+    other,
+  ];
+
+  /// Short label shown in the picker.
+  static String label(String reason) => switch (reason) {
+        scam => 'Scam or fraud',
+        inappropriateContent => 'Inappropriate content',
+        counterfeit => 'Counterfeit or fake',
+        harassment => 'Harassment or abuse',
+        other => 'Something else',
+        _ => 'Other',
+      };
+
+  /// One line explaining what the moderator will do with this report.
+  static String explanation(String reason) => switch (reason) {
+        scam => 'Someone is asking for money, a deposit, or an advance payment.',
+        inappropriateContent => 'The post shows offensive, adult, or unsafe content.',
+        counterfeit => 'The item is a fake, a knock-off, or not what it claims to be.',
+        harassment => 'The member is threatening, insulting, or stalking others.',
+        other => 'Anything else that puts the community at risk.',
+        _ => '',
+      };
+}
+
+/// A community safety report filed by a member.
+///
+/// Mirrors the `reports` table: who filed it, what was reported, why, and
+/// where it sits in the moderation lifecycle.
+class ReportModel {
+  final int id;
+  final int? reporterId;
+  final String reportableType;
+  final int reportableId;
+  final String reason;
+  final String? description;
+  final String status;
+  final String? subjectLabel;
+  final DateTime? createdAt;
+
+  const ReportModel({
+    required this.id,
+    this.reporterId,
+    required this.reportableType,
+    required this.reportableId,
+    required this.reason,
+    this.description,
+    required this.status,
+    this.subjectLabel,
+    this.createdAt,
+  });
+
+  /// True while the report is still waiting for a moderator.
+  bool get isPending => status == 'pending';
+
+  factory ReportModel.fromJson(Map<String, dynamic> json) => ReportModel(
+        id: (json['id'] as num?)?.toInt() ?? 0,
+        reporterId: (json['reporter_id'] as num?)?.toInt(),
+        reportableType: '${json['reportable_type'] ?? ReportTarget.listing}',
+        reportableId: (json['reportable_id'] as num?)?.toInt() ?? 0,
+        reason: '${json['reason'] ?? ReportReason.other}',
+        description: json['description'] as String?,
+        status: '${json['status'] ?? 'pending'}',
+        subjectLabel: json['subject_label'] as String?,
+        createdAt: DateTime.tryParse('${json['created_at'] ?? ''}'),
       );
 }

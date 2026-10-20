@@ -217,7 +217,9 @@ export default function ExchangesPage() {
       ),
     },
     {
-      // Side A — the listing the owner put up, i.e. what the proposer wants.
+      // Side A — the listing the owner put up. On a trade that is what the
+      // proposer wants; on a fulfilment ("someone has what you need") it is
+      // what the poster is asking for.
       key: "item_name",
       label: "Wanted",
       sortable: true,
@@ -229,19 +231,47 @@ export default function ExchangesPage() {
     {
       // Side B — what the proposer gives back. Never blank: a missing offer
       // is a data-integrity question, and an empty cell would hide it.
+      // On a fulfilment the return side is the POSTER's, and a poster who
+      // named none leaves it empty on purpose — that is a stated "no strings
+      // attached", not a missing offer.
       key: "offered_label",
       label: "Offered in Return",
       sortable: true,
       filter: { type: "text" },
       getValue: (x) => x.offered_label || x.offered_item || "",
+      render: (x) => {
+        const empty = !x.offered_label && !x.offered_item;
+        const oneSided = empty && x.kind === "fulfilment";
+        return (
+          <span className="text-xs">
+            {oneSided ? "Nothing asked in return" : x.offered_label || x.offered_item || "—"}
+            {oneSided ? null : x.offered_resource_id ? (
+              <span className="ml-1 rounded bg-stone-100 px-1 text-[10px] text-stone-500">listing</span>
+            ) : (
+              <span className="ml-1 rounded bg-amber-50 px-1 text-[10px] text-amber-700">skill</span>
+            )}
+          </span>
+        );
+      },
+    },
+    {
+      // Which kind of exchange this is. A fulfilment answers a NEED, so the
+      // sides are a supplier and a requester rather than a proposer and an
+      // owner.
+      key: "kind",
+      label: "Direction",
+      sortable: true,
+      filter: { type: "text" },
+      getValue: (x) => x.kind || "trade",
       render: (x) => (
-        <span className="text-xs">
-          {x.offered_label || x.offered_item || "—"}
-          {x.offered_resource_id ? (
-            <span className="ml-1 rounded bg-stone-100 px-1 text-[10px] text-stone-500">listing</span>
-          ) : (
-            <span className="ml-1 rounded bg-amber-50 px-1 text-[10px] text-amber-700">skill</span>
-          )}
+        <span
+          className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+            x.kind === "fulfilment"
+              ? "bg-emerald-100 text-emerald-800"
+              : "bg-stone-100 text-stone-600"
+          }`}
+        >
+          {x.kind === "fulfilment" ? "Supply" : "Trade"}
         </span>
       ),
     },
@@ -269,13 +299,17 @@ export default function ExchangesPage() {
       render: (x) => (
         <span className="block text-xs leading-tight">
           <span className="block">
-            <span className="text-stone-400">Proposer </span>
+            <span className="text-stone-400">
+              {x.kind === "fulfilment" ? "Supplier " : "Proposer "}
+            </span>
             <strong className="text-emerald-950">
               {x.proposer_name || x.requester_name || x.receiver || "—"}
             </strong>
           </span>
           <span className="block">
-            <span className="text-stone-400">Owner </span>
+            <span className="text-stone-400">
+              {x.kind === "fulfilment" ? "Requester " : "Owner "}
+            </span>
             {x.owner_name || x.provider || "—"}
           </span>
         </span>
@@ -317,7 +351,8 @@ export default function ExchangesPage() {
               {c.label}
             </span>
             <span className="mt-1 block text-[10px] text-stone-500">
-              Proposer {c.proposer ? "✓" : "·"} · Owner {c.owner ? "✓" : "·"}
+              {x.kind === "fulfilment" ? "Supplier" : "Proposer"} {c.proposer ? "✓" : "·"} ·{" "}
+              {x.kind === "fulfilment" ? "Requester" : "Owner"} {c.owner ? "✓" : "·"}
             </span>
           </span>
         );

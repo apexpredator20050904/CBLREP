@@ -13,6 +13,7 @@ import '../models/models.dart';
 import '../providers/auth_provider.dart';
 import '../providers/chat_provider.dart';
 import '../theme/cblrep_theme.dart';
+import '../widgets/report_sheet.dart';
 
 /// How a staged (pre-send) attachment renders in the composer preview bar.
 enum _StagedKind { image, document, video }
@@ -72,6 +73,13 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Name shown in the preview bar for the staged file.
   String _stagedName = '';
 
+  /// The chat provider, captured while the element is still active.
+  ///
+  /// `dispose()` used to look the provider up through the context, which
+  /// Flutter rejects during teardown ("Looking up a deactivated widget's
+  /// ancestor is unsafe") — so the poll timer was never actually stopped.
+  ChatProvider? _chat;
+
   @override
   void initState() {
     super.initState();
@@ -80,6 +88,7 @@ class _ChatScreenState extends State<ChatScreen> {
       input.text = widget.initialDraft!.trim();
       input.selection = TextSelection.fromPosition(TextPosition(offset: input.text.length));
     }
+    _chat = context.read<ChatProvider>();
     Future.microtask(() {
       if (!mounted) return;
       context.read<ChatProvider>().bindSelf(
@@ -119,7 +128,10 @@ class _ChatScreenState extends State<ChatScreen> {
     //
     // close() clears the timer *and* the retained message list, so returning
     // to the inbox does not hold another member's conversation in memory.
-    if (mounted) context.read<ChatProvider>().close(notify: false);
+    //
+    // The provider is the one captured in initState: looking it up through
+    // the context here is unsafe once the element is being torn down.
+    _chat?.close(notify: false);
     input.dispose();
     scroll.dispose();
     composerFocus.dispose();
@@ -447,6 +459,31 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  /// Report the member on the other side of this conversation.
+  ///
+  /// A chat is where a member meets the person they are dealing with, so it
+  /// is also where abuse shows up first. The report is filed against the
+  /// account, not against a message, and a moderator reviews it.
+  Future<void> _reportMember(int memberId, String memberName) async {
+    if (memberId <= 0) {
+      if (mounted) Feedback.info(context, 'This member cannot be reported.');
+      return;
+    }
+    final sent = await showReportSheet(
+      context,
+      reportableType: ReportTarget.user,
+      reportableId: memberId,
+      subjectName: memberName,
+    );
+    if (sent && mounted) {
+      Feedback.success(
+        context,
+        'Thank you for helping keep our community safe. '
+        'Our team will review this account.',
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final chat = context.watch<ChatProvider>();
@@ -454,9 +491,53 @@ class _ChatScreenState extends State<ChatScreen> {
     final msgs = chat.messages.map((e) => ChatMessageModel.fromJson(Map<String, dynamic>.from(e as Map))).toList();
     final dark = Theme.of(context).brightness == Brightness.dark;
     final progress = chat.uploadProgress;
+    // The member on the other side of the thread, as the server describes
+    // them — used by the report action in the app bar.
+    final conversation = chat.conversation;
+    final member = conversation?['member'] is Map
+        ? Map<String, dynamic>.from(conversation!['member'] as Map)
+        : const <String, dynamic>{};
+    final otherId = (member['id'] as num?)?.toInt() ?? 0;
+    final canReport = otherId > 0 && otherId != me;
     return Scaffold(
       backgroundColor: dark ? CblrepColors.deepForest : null,
-      appBar: AppBar(title: Text(widget.title, style: const TextStyle(fontSize: 15))),
+      appBar: AppBar(
+        title: Text(widget.title, style: const TextStyle(fontSize: 15)),
+        actions: [
+          PopupMenuButton<String>(
+            tooltip: 'More actions',
+            icon: Icon(Icons.more_vert, size: 20, color: dark ? Colors.white70 : null),
+            onSelected: (value) {
+              if (value == 'report_user') {
+                _reportMember(otherId, '${member['name'] ?? widget.title}');
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'report_user',
+                enabled: canReport,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.report_gmailerrorred_outlined,
+                      size: 18,
+                      color: canReport ? CblrepColors.dangerRed : Colors.black26,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Report user',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: canReport ? null : Colors.black26,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
       body: Column(children: [
         Expanded(
           child: chat.loading

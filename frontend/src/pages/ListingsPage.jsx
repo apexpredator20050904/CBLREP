@@ -116,6 +116,18 @@ export default function ListingsPage({ kind = "all" }) {
       sortable: true,
       filter: { type: "text" },
       strong: true,
+      getValue: (r) => r.title || "",
+      render: (r) => (
+        <span className="block text-xs leading-tight">
+          <span className="block font-semibold text-emerald-950">{r.title}</span>
+          {/* A NEED can say how much it needs ("5 kg of rice"). */}
+          {r.quantity ? (
+            <span className="block text-[11px] text-stone-500">
+              Needs: {r.quantity}
+            </span>
+          ) : null}
+        </span>
+      ),
     },
     {
       key: "type",
@@ -138,6 +150,7 @@ export default function ListingsPage({ kind = "all" }) {
           type={r.compensation_type}
           label={r.compensation_label}
           price={r.price}
+          budget={r.price_role === "budget"}
         />
       ),
       // DataTable filters match on the accessor value; expose the raw key so

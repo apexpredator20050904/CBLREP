@@ -1,0 +1,21 @@
+# Upload only what the frontend build needs — the Laravel backend, Flutter app
+# and local runtime logs would otherwise be uploaded on every Vercel build.
+backend
+mobile
+storage
+f.log
+run-emulator.sh
+**/node_modules
+**/dist
+**/build
+**/.env
+**/.env.local
+**/.git
+**/.idea
+**/tests
+**/android
+**/ios
+**/macos
+**/linux
+**/windows
+**/*.md

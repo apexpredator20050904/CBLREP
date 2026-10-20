@@ -110,6 +110,51 @@ class Exchange extends Model
     }
 
     // ------------------------------------------------------------------
+    // Direction: TRADE vs FULFILMENT
+    // ------------------------------------------------------------------
+
+    /**
+     * Is this exchange a FULFILMENT (someone answering a NEED) rather than a
+     * TRADE (someone answering an OFFER)?
+     *
+     * The listing's own type decides it, and the two directions swap the two
+     * parties' roles:
+     *
+     *   OFFER → the proposer is the DEMANDER, the owner is the supplier.
+     *   NEED  → the proposer is the SUPPLIER, the owner is the demander.
+     *
+     * The state machine, the dual confirmation and the notifications are
+     * shared; only the roles and therefore the wording differ.
+     */
+    public function isNeed(): bool
+    {
+        return (bool) $this->resource?->isNeed();
+    }
+
+    /**
+     * The member who proposed this exchange.
+     *
+     * On a trade that is the demander (receiver_id); on a fulfilment it is the
+     * supplier (provider_id), because the roles swap with the direction.
+     */
+    public function proposerId(): int
+    {
+        return $this->isNeed() ? (int) $this->provider_id : (int) $this->receiver_id;
+    }
+
+    /**
+     * The member who posted the listing this exchange answers.
+     *
+     * On a trade that is the supplier; on a fulfilment, the demander. This is
+     * the one who may accept or decline — "the listing owner", never "the
+     * provider", because the provider is the supplier in both directions.
+     */
+    public function ownerId(): int
+    {
+        return (int) ($this->resource?->user_id ?? 0);
+    }
+
+    // ------------------------------------------------------------------
     // State machine
     // ------------------------------------------------------------------
 
@@ -131,13 +176,18 @@ class Exchange extends Model
     /**
      * True when the given member already recorded their half of the
      * dual confirmation for this exchange.
+     *
+     * The proposer holds `proposer_confirmed` and the listing owner holds
+     * `owner_confirmed`, whichever side of the trade each of them is on — so
+     * on a fulfilment the supplier confirms the handover and the requester
+     * confirms the receipt.
      */
     public function hasConfirmed(int $userId): bool
     {
-        if ($userId === $this->receiver_id) {
+        if ($userId === $this->proposerId()) {
             return (bool) $this->proposer_confirmed;
         }
-        if ($userId === $this->provider_id) {
+        if ($userId === $this->ownerId()) {
             return (bool) $this->owner_confirmed;
         }
 
@@ -190,11 +240,15 @@ class Exchange extends Model
      * Falls back to a neutral label rather than null so the table cell is
      * never blank — a missing offer is a data-integrity question, and an
      * empty cell would hide it.
+     *
+     * On a fulfilment the return side is the poster's, and the poster may
+     * have named none: "I need this" with no strings attached. That is not a
+     * missing offer but a stated one, so it says so.
      */
     public function offeredLabel(): string
     {
         return $this->offeredResource?->title
-            ?: ($this->offered_item ?: 'Skill / service offered');
+            ?: ($this->offered_item ?: ($this->isNeed() ? 'Nothing asked in return' : 'Skill / service offered'));
     }
 
     /** What the provider is offering — the listing being requested. */
