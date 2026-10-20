@@ -231,21 +231,28 @@ export default function ExchangesPage() {
     {
       // Side B — what the proposer gives back. Never blank: a missing offer
       // is a data-integrity question, and an empty cell would hide it.
+      // On a fulfilment the return side is the POSTER's, and a poster who
+      // named none leaves it empty on purpose — that is a stated "no strings
+      // attached", not a missing offer.
       key: "offered_label",
       label: "Offered in Return",
       sortable: true,
       filter: { type: "text" },
       getValue: (x) => x.offered_label || x.offered_item || "",
-      render: (x) => (
-        <span className="text-xs">
-          {x.offered_label || x.offered_item || "—"}
-          {x.offered_resource_id ? (
-            <span className="ml-1 rounded bg-stone-100 px-1 text-[10px] text-stone-500">listing</span>
-          ) : (
-            <span className="ml-1 rounded bg-amber-50 px-1 text-[10px] text-amber-700">skill</span>
-          )}
-        </span>
-      ),
+      render: (x) => {
+        const empty = !x.offered_label && !x.offered_item;
+        const oneSided = empty && x.kind === "fulfilment";
+        return (
+          <span className="text-xs">
+            {oneSided ? "Nothing asked in return" : x.offered_label || x.offered_item || "—"}
+            {oneSided ? null : x.offered_resource_id ? (
+              <span className="ml-1 rounded bg-stone-100 px-1 text-[10px] text-stone-500">listing</span>
+            ) : (
+              <span className="ml-1 rounded bg-amber-50 px-1 text-[10px] text-amber-700">skill</span>
+            )}
+          </span>
+        );
+      },
     },
     {
       // Which kind of exchange this is. A fulfilment answers a NEED, so the
