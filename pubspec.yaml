@@ -23,7 +23,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # 1.5.0 — redesigned home feed (localized hero, sticky search + filters,
 # realistic resource cards, shimmer skeletons) and the community safety
 # reporting system (report a posting or a member).
-version: 1.5.3+8
+version: 1.5.4+9
 
 environment:
   sdk: ^3.12.2

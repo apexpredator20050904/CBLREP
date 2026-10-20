@@ -8,6 +8,7 @@ import 'package:untitled1/providers/listings_provider.dart';
 import 'package:untitled1/screens/listing_detail_screen.dart';
 import 'package:untitled1/theme/cblrep_theme.dart';
 import 'package:untitled1/widgets/listing_card.dart';
+import 'package:untitled1/widgets/trade_offer_sheet.dart';
 
 /// A NEED is answered from the other side of the table.
 ///
@@ -76,6 +77,23 @@ Widget _cardHost(ListingModel listing) => MaterialApp(
       home: Scaffold(body: ListingCard(listing: listing)),
     );
 
+/// The trade-offer sheet reads the signed-in member and their own listings
+/// from the providers.
+Widget _sheetHost(ListingModel listing) => MultiProvider(
+      providers: [
+        ChangeNotifierProvider<AuthProvider>(
+          create: (_) => AuthProvider(ApiService.instance),
+        ),
+        ChangeNotifierProvider<ListingsProvider>(
+          create: (_) => ListingsProvider(ApiService.instance),
+        ),
+      ],
+      child: MaterialApp(
+        theme: CblrepTheme.lightCream,
+        home: Scaffold(body: TradeOfferSheet(listing: listing)),
+      ),
+    );
+
 void main() {
   /// The detail screen is a ListView, so the action buttons at the bottom
   /// are only built when the viewport is tall enough to include them.
@@ -139,5 +157,44 @@ void main() {
         _cardHost(_listing(type: 'request', compensation: 'paid', price: 300)));
     await tester.pumpAndSettle();
     expect(find.text('I Can Supply'), findsOneWidget);
+  });
+
+  group('the trade sheet on a need', () {
+    /// The sheet asks the SUPPLIER for the return side — except on a need,
+    /// where the return side is the POSTER's and the server records it. The
+    /// supplier gets to read the terms, not rewrite them.
+    testWidgets('shows the poster terms instead of an editable return side',
+        (tester) async {
+      tester.view.physicalSize = const Size(400, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(_sheetHost(_listing(
+        type: 'request',
+        wanted: '2 hours of childcare',
+      )));
+      await tester.pumpAndSettle();
+
+      expect(find.text('In return you would get: 2 hours of childcare'),
+          findsOneWidget);
+      expect(find.text('What you give in return'), findsNothing,
+          reason: 'On a need the return side belongs to the poster.');
+      expect(find.text('My listing'), findsNothing);
+    });
+
+    testWidgets('says so when the poster named no return side',
+        (tester) async {
+      tester.view.physicalSize = const Size(400, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(_sheetHost(_listing(type: 'request')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('They did not name anything in return'),
+        findsOneWidget,
+      );
+    });
   });
 }

@@ -50,11 +50,11 @@ class TradeOfferSheetState extends State<TradeOfferSheet> {
       if (trinidadBarangays.contains(user.barangay)) _barangay = user.barangay;
       _purok.text = user.purokSitio;
     }
-    // On a NEED the reader is the SUPPLIER: they bring what the poster wants
-    // and ask for the poster's side in return, which the poster already named
-    // on the listing. Prefilling it saves the member from retyping it.
-    if (widget.listing.isNeed && (widget.listing.wantedItem ?? '').isNotEmpty) {
-      _describe.text = widget.listing.wantedItem!;
+    if (widget.listing.isNeed) {
+      // On a NEED the return side belongs to the POSTER: it is what they put
+      // on the listing, and the server writes it. The supplier has nothing to
+      // choose here — the poster's terms are shown read-only, and any
+      // variation is settled in chat.
       _mode = 'describe';
     } else if (_ownOfferable().isNotEmpty) {
       // Prefer the pick-a-listing path when the member already has something to
@@ -85,13 +85,20 @@ class TradeOfferSheetState extends State<TradeOfferSheet> {
   /// Validate locally first so a member sees the fix in one line instead of
   /// waiting on a round trip that answers 422 with a server-phrased message.
   String? _validate(String offeredItem) {
+    // On a need the return side is the poster's, so there is nothing for the
+    // supplier to fill in — and nothing that could be wrong.
+    if (widget.listing.isNeed) {
+      final purok = _purok.text.trim();
+      if (purok.isEmpty || !isValidPurokSitio(purok)) {
+        return 'Enter a pick-up point like "Purok 3" or "Sitio Name".';
+      }
+      return null;
+    }
     if (_mode == 'listing' && _offeredResourceId == null) {
       return 'Choose which of your listings to offer.';
     }
     if (_mode == 'describe' && offeredItem.isEmpty) {
-      return widget.listing.isNeed
-          ? 'Say what you would like in return for bringing this.'
-          : 'Describe what you will offer in return.';
+      return 'Describe what you will offer in return.';
     }
     final purok = _purok.text.trim();
     if (purok.isEmpty || !isValidPurokSitio(purok)) {
@@ -113,10 +120,16 @@ class TradeOfferSheetState extends State<TradeOfferSheet> {
       _error = null;
     });
     try {
+      // On a NEED nothing is offered here: the return side is the poster's
+      // and the server writes it, so the record always states the poster's
+      // own terms.
+      final isNeed = widget.listing.isNeed;
       await ApiService.instance.createExchange(
         resourceId: widget.listing.id,
-        offeredResourceId: _mode == 'listing' ? _offeredResourceId : null,
-        offeredItem: _mode == 'describe' ? InputSanitizer.text(offeredItem, max: 160) : null,
+        offeredResourceId: !isNeed && _mode == 'listing' ? _offeredResourceId : null,
+        offeredItem: !isNeed && _mode == 'describe'
+            ? InputSanitizer.text(offeredItem, max: 160)
+            : null,
         barangay: _barangay,
         purokSitio: InputSanitizer.clean(_purok.text.trim()),
       );
@@ -192,7 +205,7 @@ class TradeOfferSheetState extends State<TradeOfferSheet> {
               ],
               const SizedBox(height: 16),
               Text(
-                isNeed ? 'What you would like in return' : 'What you give in return',
+                isNeed ? 'Their terms' : 'What you give in return',
                 style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: foreground),
               ),
               const SizedBox(height: 8),
@@ -201,9 +214,32 @@ class TradeOfferSheetState extends State<TradeOfferSheet> {
               // trade a skill.
               //
               // On a NEED the return side belongs to the POSTER, so there is
-              // no "my listing" to pick — the supplier states in words what
-              // they will take, prefilled from what the poster offered.
-              if (!isNeed)
+              // nothing to choose and nothing that could be mis-stated: their
+              // terms are shown as they wrote them, and the server records
+              // them.
+              if (isNeed)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: CblrepColors.compBarter.withValues(alpha: dark ? 0.16 : 0.10),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: CblrepColors.compBarter.withValues(alpha: 0.35),
+                    ),
+                  ),
+                  child: Text(
+                    (widget.listing.wantedItem ?? '').isNotEmpty
+                        ? 'In return you would get: ${widget.listing.wantedItem}'
+                        : 'They did not name anything in return. You can still '
+                            'bring it and settle the rest in chat.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: dark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                )
+              else
                 SegmentedButton<String>(
                   showSelectedIcon: false,
                   segments: const [
@@ -217,7 +253,7 @@ class TradeOfferSheetState extends State<TradeOfferSheet> {
                   }),
                 ),
               const SizedBox(height: 12),
-              if (_mode == 'listing')
+              if (!isNeed && _mode == 'listing')
                 if (own.isEmpty)
                   Text(
                     'You have no other active listings. Switch to “Describe it” to name an item or a skill.',
@@ -233,17 +269,12 @@ class TradeOfferSheetState extends State<TradeOfferSheet> {
                         .toList(),
                     onChanged: (value) => setState(() => _offeredResourceId = value),
                   )
-              else
+              else if (!isNeed)
                 TextField(
                   controller: _describe,
                   maxLength: 160,
-                  decoration: InputDecoration(
-                    labelText: isNeed
-                        ? 'What the poster offered in return (adjust if you agree to something else)'
-                        : 'e.g. 5 kg of rice, or an hour of plumbing help',
-                    helperText: isNeed
-                        ? 'They named this on the request — change it only if you would rather take something else.'
-                        : null,
+                  decoration: const InputDecoration(
+                    labelText: 'e.g. 5 kg of rice, or an hour of plumbing help',
                   ),
                 ),
               const SizedBox(height: 12),
