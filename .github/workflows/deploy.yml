@@ -36,6 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Deploy
+        id: deploy
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
@@ -48,6 +49,7 @@ jobs:
             # ARE set, a broken deployment is a real failure and stops the
             # build loudly.
             echo "::notice::The deploy secrets are not set on this repository — nothing was deployed."
+            echo "deployed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           mkdir -p ~/.ssh
@@ -79,8 +81,13 @@ jobs:
           sudo systemctl restart cblrep-queue 2>/dev/null || \
             echo "::notice::cblrep-queue is not enabled on this host."
           REMOTE
+          echo "deployed=true" >> "$GITHUB_OUTPUT"
 
       - name: Smoke test
+        # Only after a real deployment: without the secrets nothing was
+        # deployed, and testing a host we never touched would report a
+        # failure that has nothing to do with this build.
+        if: steps.deploy.outputs.deployed == 'true'
         run: |
           set -euo pipefail
           for attempt in 1 2 3 4 5; do
