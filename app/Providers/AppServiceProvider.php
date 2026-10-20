@@ -36,9 +36,19 @@ class AppServiceProvider extends ServiceProvider
      */
     private function configureRateLimiters(): void
     {
+        // Sign-in attempts, per IP and per account.
+        //
+        // The per-account budget is the one a human feels: at 5/min a member
+        // who mistyped twice was locked out for a minute, and the admin
+        // console — which shares this limiter with member sign-in — tripped
+        // it during ordinary testing. 10/min still slows a credential-
+        // stuffing run to a crawl while leaving a real person room to
+        // mistype. The per-IP ceiling covers the "one host, many accounts"
+        // case, and is raised for the same reason: a barangay's members
+        // often share one NAT address.
         RateLimiter::for('auth-login', fn (Request $request) => [
-            Limit::perMinute(10)->by('ip:'.$request->ip()),
-            Limit::perMinute(5)->by('account:'.$request->ip().'|'.Str::lower((string) $request->input('email'))),
+            Limit::perMinute(20)->by('ip:'.$request->ip()),
+            Limit::perMinute(10)->by('account:'.$request->ip().'|'.Str::lower((string) $request->input('email'))),
         ]);
 
         RateLimiter::for('auth-register', fn (Request $request) => Limit::perMinute(10)->by('ip:'.$request->ip()));
@@ -74,11 +84,16 @@ class AppServiceProvider extends ServiceProvider
         ]);
 
         // Unauthenticated catalogue reads (the public listings feed). Mobile
-        // clients poll this in the background, so the budget is per-IP and
-        // generous enough for several app instances on one NAT address, while
-        // still stopping a single client from hammering the full scan.
+        // clients poll this in the background, so the budget is per-IP.
+        //
+        // 120/min was too tight for the network this portal actually runs on:
+        // a barangay's members share one router address, and a mobile
+        // carrier's CGNAT puts hundreds of subscribers behind a single IP. A
+        // handful of neighbours refreshing the feed could exhaust the budget
+        // for everyone. 300/min still stops one client from scanning the
+        // whole catalogue, while leaving room for a shared address.
         RateLimiter::for('public-read', fn (Request $request) => [
-            Limit::perMinute(120)->by('public-read:'.$request->ip()),
+            Limit::perMinute(300)->by('public-read:'.$request->ip()),
         ]);
 
         // Community safety reports. Keyed by the member (not the IP), because

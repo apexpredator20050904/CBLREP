@@ -299,9 +299,12 @@ class PublicListingsFeedTest extends TestCase
 
     public function test_the_public_feed_is_rate_limited(): void
     {
-        // 120/min per IP. Burst past that and the limiter answers 429.
+        // 300/min per IP — a barangay's members share one router address, and
+        // a mobile carrier's CGNAT puts hundreds of subscribers behind a
+        // single IP, so the budget has to leave room for a shared address.
+        // Burst past it and the limiter answers 429.
         $statuses = [];
-        for ($i = 0; $i < 130; $i++) {
+        for ($i = 0; $i < 320; $i++) {
             $statuses[] = $this->getJson('/api/listings')->status();
         }
 

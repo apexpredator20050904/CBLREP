@@ -63,7 +63,14 @@ class ConversationController extends Controller
 
         // Listing-scoped inquiry: buyer = caller, seller = the other member.
         if (! empty($validated['listing_id'])) {
-            $listing = Resource::findOrFail($validated['listing_id']);
+            // Only a listing that is still publicly visible can be inquired
+            // about. Without this check a member who knew the id could open a
+            // thread about an ARCHIVED, TRADED or moderator-REMOVED listing
+            // and the owner would still be notified about it — the barter
+            // endpoint has always refused those, so the chat door was the way
+            // around moderation.
+            $listing = Resource::where('is_active', true)->find($validated['listing_id']);
+            abort_if(! $listing, 404, 'That listing is no longer available.');
             $sellerId = (int) $listing->user_id;
             abort_if($sellerId === $me, 422, 'You cannot inquire about your own listing.');
             abort_if($sellerId !== (int) $validated['user_id'], 422, 'The listing owner does not match the person you are messaging.');

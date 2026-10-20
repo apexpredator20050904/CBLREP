@@ -205,6 +205,35 @@ class NeedPostingTest extends TestCase
             ->assertJsonPath('errors.compensation_type.0', 'A need cannot be free. Choose Barter or Paid.');
     }
 
+    public function test_the_direction_aliases_land_on_the_same_row(): void
+    {
+        // "need" and "needs" are the words members actually type; they must
+        // land on the same row as "request". And a typo must not silently
+        // become a need — the old check matched any string CONTAINING
+        // "request", so "not-a-request" was a need.
+        //
+        // A verified member, because this posts four listings and an
+        // unverified one is capped.
+        $member = $this->member('aliases@example.test');
+        $member->update(['is_verified' => true]);
+
+        $this->postListing($member, ['type' => 'need', 'listingType' => 'need'])
+            ->assertCreated()
+            ->assertJsonPath('data.type', 'request');
+
+        $this->postListing($member, ['type' => 'needs', 'listingType' => 'needs'])
+            ->assertCreated()
+            ->assertJsonPath('data.type', 'request');
+
+        $this->postListing($member, ['type' => 'offer', 'listingType' => 'offer'])
+            ->assertCreated()
+            ->assertJsonPath('data.type', 'offer');
+
+        $this->postListing($member, ['type' => 'nonsense', 'listingType' => 'nonsense'])
+            ->assertCreated()
+            ->assertJsonPath('data.type', 'offer');
+    }
+
     public function test_the_model_knows_which_direction_a_listing_is(): void
     {
         $member = $this->member('model@example.test');

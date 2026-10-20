@@ -140,8 +140,13 @@ class ListingController extends Controller
             return $rejection;
         }
 
+        // The direction, normalised to the two words the column stores. The
+        // aliases are accepted so a client that says "need" (or an old build
+        // that says "needs") lands on the same row as "request" — the
+        // previous loose check matched any string CONTAINING "request",
+        // which silently turned typos into needs.
         $listingType = strtolower($validated['listingType'] ?? $validated['type'] ?? 'offer');
-        $type = str_contains($listingType, 'request') ? 'request' : 'offer';
+        $type = in_array($listingType, ['request', 'need', 'needs'], true) ? 'request' : 'offer';
 
         $compensation = strtolower($validated['compensation_type'] ?? Resource::BARTER);
         if (! in_array($compensation, Resource::COMPENSATIONS, true)) {
@@ -261,18 +266,26 @@ class ListingController extends Controller
             // How much is needed — a NEED-only field.
             'quantity' => 'nullable|string|max:60',
             // The direction is accepted so a client that echoes it back does
-            // not 422, but it can never be CHANGED (see below).
-            'type' => 'sometimes|string|in:offer,request',
+            // not 422, but it can never be CHANGED (see below). The aliases
+            // match the ones `store()` accepts.
+            'type' => 'sometimes|string|in:offer,request,need,needs',
         ]);
         // The direction of a listing is immutable. Flipping an offer into a
         // need (or the reverse) would invert the meaning of every shared
         // column and invalidate the proposals and claims already attached to
         // the row — so a member posts a new listing instead.
-        if (array_key_exists('type', $validated)
-            && $validated['type'] !== ($resource->type ?? 'offer')) {
-            return response()->json([
-                'message' => "A listing's direction cannot be changed after posting. Archive this one and post a new listing instead.",
-            ], 422);
+        //
+        // The incoming value is normalised first, so a client echoing "need"
+        // back at a need is not told it changed the direction.
+        if (array_key_exists('type', $validated)) {
+            $incomingType = in_array(strtolower((string) $validated['type']), ['request', 'need', 'needs'], true)
+                ? 'request'
+                : 'offer';
+            if ($incomingType !== ($resource->type ?? 'offer')) {
+                return response()->json([
+                    'message' => "A listing's direction cannot be changed after posting. Archive this one and post a new listing instead.",
+                ], 422);
+            }
         }
         // A need cannot be free — same rule as on create, enforced here so an
         // edit cannot slip a need into the illegal cell of the matrix.

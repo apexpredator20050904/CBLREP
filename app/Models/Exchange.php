@@ -240,11 +240,15 @@ class Exchange extends Model
      * Falls back to a neutral label rather than null so the table cell is
      * never blank — a missing offer is a data-integrity question, and an
      * empty cell would hide it.
+     *
+     * On a fulfilment the return side is the poster's, and the poster may
+     * have named none: "I need this" with no strings attached. That is not a
+     * missing offer but a stated one, so it says so.
      */
     public function offeredLabel(): string
     {
         return $this->offeredResource?->title
-            ?: ($this->offered_item ?: 'Skill / service offered');
+            ?: ($this->offered_item ?: ($this->isNeed() ? 'Nothing asked in return' : 'Skill / service offered'));
     }
 
     /** What the provider is offering — the listing being requested. */

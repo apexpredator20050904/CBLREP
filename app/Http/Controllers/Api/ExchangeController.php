@@ -188,17 +188,44 @@ class ExchangeController extends Controller
             'This is a paid request. Send the poster a message with your price instead of a trade proposal.',
         );
 
-        // The "in return" side is what separates a barter from a gift, so at
-        // least one of the two forms must be present.
-        if (empty($validated['offered_resource_id']) && blank($validated['offered_item'] ?? null)) {
-            throw ValidationException::withMessages([
-                'offered_item' => $isNeed
-                    ? 'Say what you would like in return for bringing this — a direct barter requires both sides.'
-                    : 'Name what you are offering in return — a direct barter requires both sides.',
-            ]);
+        // The return side of the trade. On a TRADE the proposer offers it and
+        // the two-sided rule holds — that is what separates a barter from a
+        // one-sided gift, and it stays absolute there.
+        //
+        // On a FULFILMENT the return side belongs to the POSTER: it is what
+        // they put on the listing, and the server writes it. A supplier
+        // therefore cannot put a different offer on the record than the one
+        // the poster actually made — the trade row always states the
+        // poster's terms, and any variation is settled in chat.
+        $posterOffer = null;
+        if ($wanted->compensationType() === Resource::BARTER) {
+            $posterOffer = trim((string) $wanted->wanted_item);
+            $posterOffer = $posterOffer !== '' ? $posterOffer : null;
         }
 
-        $exchange = DB::transaction(function () use ($validated, $wanted, $user, $isNeed, $receiverId) {
+        $offeredResourceId = $validated['offered_resource_id'] ?? null;
+
+        if ($isNeed) {
+            // A poster who named no return side leaves the supplier free to
+            // bring the item for nothing — "I need this" with no strings is a
+            // legitimate want ad, and forcing the supplier to invent a return
+            // side would mean the poster accepting a trade they never
+            // proposed. The one-sided rule that protects a TRADE is not
+            // needed here: the supplier is giving, not receiving.
+            $offeredItem = $posterOffer;
+        } else {
+            $offeredItem = isset($validated['offered_item'])
+                ? trim($validated['offered_item'])
+                : null;
+
+            if (empty($offeredResourceId) && blank($offeredItem ?? null)) {
+                throw ValidationException::withMessages([
+                    'offered_item' => 'Name what you are offering in return — a direct barter requires both sides.',
+                ]);
+            }
+        }
+
+        $exchange = DB::transaction(function () use ($validated, $wanted, $user, $isNeed, $receiverId, $offeredItem, $offeredResourceId) {
             $offered = null;
 
             // Guard the self-deal case that spans both sides of the trade.
@@ -221,10 +248,8 @@ class ExchangeController extends Controller
 
             $exchange = Exchange::create([
                 'resource_id' => $wanted->id,
-                'offered_resource_id' => $validated['offered_resource_id'] ?? null,
-                'offered_item' => isset($validated['offered_item'])
-                    ? trim($validated['offered_item'])
-                    : null,
+                'offered_resource_id' => $offeredResourceId,
+                'offered_item' => $offeredItem,
                 // OFFER: provider = the owner (supplier), receiver = proposer.
                 // NEED : provider = the proposer (supplier), receiver = owner.
                 'provider_id' => $isNeed ? $user->id : $wanted->user_id,

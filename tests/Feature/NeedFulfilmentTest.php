@@ -252,4 +252,87 @@ class NeedFulfilmentTest extends TestCase
         $this->assertSame($supplier->id, $exchange->proposerId());
         $this->assertSame($poster->id, $exchange->ownerId());
     }
+
+    public function test_the_return_side_is_the_posters_own_offer(): void
+    {
+        // The return side of a fulfilment belongs to the poster: it is what
+        // they wrote on the listing, and the server writes it. A supplier
+        // therefore cannot put a different offer on the record than the one
+        // the poster actually made.
+        $poster = $this->member('poster@example.test');
+        $supplier = $this->member('supplier@example.test');
+        $need = $this->need($poster); // wanted_item: 2 hours of childcare
+
+        $this->actingAs($supplier)
+            ->postJson('/api/exchanges', [
+                'resource_id' => $need->id,
+                // The supplier tries to rewrite the poster's offer.
+                'offered_item' => 'Pangisdaan of my choosing',
+                'barangay' => 'Poblacion',
+                'purok_sitio' => 'Purok 3',
+            ])
+            ->assertCreated();
+
+        $this->assertDatabaseHas('exchanges', [
+            'resource_id' => $need->id,
+            'offered_item' => '2 hours of childcare',
+        ]);
+    }
+
+    public function test_a_poster_who_named_no_return_side_gets_a_one_sided_supply(): void
+    {
+        // "I need this, no strings attached" is a legitimate want ad. The
+        // one-sided rule that protects a TRADE must not force the supplier to
+        // invent a return side the poster never proposed.
+        $poster = $this->member('poster@example.test');
+        $supplier = $this->member('supplier@example.test');
+        $need = $this->need($poster);
+        $need->update(['wanted_item' => null]);
+
+        $this->actingAs($supplier)
+            ->postJson('/api/exchanges', [
+                'resource_id' => $need->id,
+                'barangay' => 'Poblacion',
+                'purok_sitio' => 'Purok 3',
+            ])
+            ->assertCreated()
+            ->assertJsonPath('exchange.offered', 'Nothing asked in return');
+
+        $this->assertDatabaseHas('exchanges', [
+            'resource_id' => $need->id,
+            'offered_item' => null,
+            'offered_resource_id' => null,
+        ]);
+    }
+
+    public function test_a_trade_still_needs_both_sides(): void
+    {
+        // The one-sided rule is unchanged for a trade: that is what stops a
+        // proposer turning a gift into a recorded barter.
+        $owner = $this->member('owner@example.test');
+        $proposer = $this->member('proposer@example.test');
+        $listing = Resource::create([
+            'user_id' => $owner->id,
+            'category_id' => Category::firstOrCreate(['name' => 'Tools'])->id,
+            'type' => 'offer',
+            'compensation_type' => 'barter',
+            'title' => 'A drill',
+            'barangay' => 'Poblacion',
+            'purok_sitio' => 'Purok 3',
+            'is_active' => true,
+            'status' => 'active',
+        ]);
+
+        $this->actingAs($proposer)
+            ->postJson('/api/exchanges', [
+                'resource_id' => $listing->id,
+                'barangay' => 'Poblacion',
+                'purok_sitio' => 'Purok 3',
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath(
+                'errors.offered_item.0',
+                'Name what you are offering in return — a direct barter requires both sides.',
+            );
+    }
 }
