@@ -791,11 +791,22 @@ class AdminPortalController extends Controller
             // Parties. `requester_name`/`owner_name` are the names the table
             // has always rendered; the proposer_* pair makes the direction of
             // the proposal explicit for the panel.
+            //
+            // The roles swap with the direction: on a trade the proposer is
+            // the demander (receiver) and the owner is the supplier
+            // (provider); on a fulfilment — someone answering a NEED — the
+            // proposer is the supplier and the owner is the demander. The
+            // model knows which, so the panel does not have to guess.
             'requester_name' => $e->receiver?->name ?? 'Member',
             'owner_name' => $e->provider?->name ?? 'Member',
-            'proposer_name' => $e->receiver?->name ?? 'Member',
-            'proposer_id' => $e->receiver_id,
-            'owner_id' => $e->provider_id,
+            'proposer_name' => $e->proposerId() === $e->provider_id
+                ? ($e->provider?->name ?? 'Member')
+                : ($e->receiver?->name ?? 'Member'),
+            'proposer_id' => $e->proposerId(),
+            'owner_id' => $e->ownerId(),
+            // trade | fulfilment — lets the panel read the row in the right
+            // words ("Supplier / Requester" instead of "Proposer / Owner").
+            'kind' => $e->isNeed() ? 'fulfilment' : 'trade',
             'users' => ($e->provider?->name ?? 'Member').' ↔ '.($e->receiver?->name ?? 'Member'),
 
             'status' => $e->frontendStatus(),

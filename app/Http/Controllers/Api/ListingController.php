@@ -114,6 +114,9 @@ class ListingController extends Controller
             // false) for free/barter, which have no price to negotiate.
             'price_negotiable' => 'nullable|boolean',
             'condition' => 'nullable|string|max:255',
+            // How much is needed. Only meaningful on a NEED ("5 kg of rice");
+            // cleared for offers, which are one thing the member already owns.
+            'quantity' => 'nullable|string|max:60',
             'location' => 'nullable|string|max:255',
             'barangay' => ['required', 'string', \App\Support\Barangays::rule()],
             'purok_sitio' => ['required', 'string', 'max:60', \App\Support\Puroks::rule()],
@@ -145,8 +148,31 @@ class ListingController extends Controller
             $compensation = Resource::BARTER;
         }
 
+        // ── Direction rules ───────────────────────────────────────────
+        // An OFFER and a NEED share every column but read them from opposite
+        // ends, so the direction decides which combinations are legal.
+        //
+        //   free  + offer → a gift          free  + need  → ILLEGAL
+        //   barter+ offer → a trade          barter+ need  → "I need X, I can trade Y"
+        //   paid  + offer → a sale           paid  + need  → "I need X, I can pay up to ₱N"
+        //
+        // A need cannot be free: "I need this, free" is not a want ad, it is a
+        // request for a gift — which is what posting an OFFER with Free is for.
+        // Real marketplaces agree (Craigslist/OLX/Freecycle wanted ads are
+        // always "willing to pay" or "will trade").
+        if ($type === 'request' && $compensation === Resource::FREE) {
+            return response()->json([
+                'message' => 'A need cannot be free. Choose Barter (I can trade something in return) or Paid (I can pay up to a budget).',
+                'errors' => [
+                    'compensation_type' => ['A need cannot be free. Choose Barter or Paid.'],
+                ],
+            ], 422);
+        }
+
         // Compensation invariant: a PAID listing must carry a real price;
-        // free/barter listings never carry one.
+        // free/barter listings never carry one. On a NEED the price is the
+        // poster's budget ceiling — still required, because "I need this" with
+        // no ceiling is not a purchase anyone can answer.
         if ($compensation === Resource::PAID && empty($validated['price'])) {
             return response()->json(['message' => 'A price is required for a paid listing.', 'errors' => ['price' => ['A price is required for a paid listing.']]], 422);
         }
@@ -161,17 +187,24 @@ class ListingController extends Controller
             // Price is stored only for a paid sale; free/barter keep it null so
             // a stale figure can never surface on a gift or trade.
             'price' => $compensation === Resource::PAID ? ($validated['price'] ?? null) : null,
-            // Whether the seller welcomes a counter-offer. Only a paid listing
-            // can say yes; a gift or a trade has no price to negotiate.
-            'price_negotiable' => $compensation === Resource::PAID
+            // Whether the seller welcomes a counter-offer. Only a paid OFFER
+            // can say yes; a gift, a trade or a budget ceiling has no price to
+            // negotiate.
+            'price_negotiable' => $compensation === Resource::PAID && $type !== 'request'
                 ? (bool) ($validated['price_negotiable'] ?? false)
                 : false,
             // The return side of a barter. Advisory only — the owner still
             // accepts or rejects each proposal — so free/paid never retain it.
+            // On a NEED it reads the other way round: what the POSTER can
+            // trade in return, not what the owner wants back.
             'wanted_item' => $compensation === Resource::BARTER
                 ? ($validated['wanted_item'] ?? null)
                 : null,
             'condition' => $validated['condition'] ?? 'Good',
+            // How much is needed — a NEED-only field, cleared for offers.
+            'quantity' => $type === 'request'
+                ? ($validated['quantity'] ?? null)
+                : null,
             'title' => $validated['title'],
             'description' => $validated['description'] ?? '',
             'location' => $validated['location'] ?? trim($validated['barangay'].', '.(\App\Support\Puroks::canonicalize($validated['purok_sitio']) ?? '')),
@@ -225,7 +258,33 @@ class ListingController extends Controller
             'images' => 'nullable|array|max:6',
             'images.*' => 'image|mimes:jpg,jpeg,png|max:5120',
             'wanted_item' => 'nullable|string|max:160',
+            // How much is needed — a NEED-only field.
+            'quantity' => 'nullable|string|max:60',
+            // The direction is accepted so a client that echoes it back does
+            // not 422, but it can never be CHANGED (see below).
+            'type' => 'sometimes|string|in:offer,request',
         ]);
+        // The direction of a listing is immutable. Flipping an offer into a
+        // need (or the reverse) would invert the meaning of every shared
+        // column and invalidate the proposals and claims already attached to
+        // the row — so a member posts a new listing instead.
+        if (array_key_exists('type', $validated)
+            && $validated['type'] !== ($resource->type ?? 'offer')) {
+            return response()->json([
+                'message' => "A listing's direction cannot be changed after posting. Archive this one and post a new listing instead.",
+            ], 422);
+        }
+        // A need cannot be free — same rule as on create, enforced here so an
+        // edit cannot slip a need into the illegal cell of the matrix.
+        $effectiveCompensation = $validated['compensation_type'] ?? $resource->compensationType();
+        if ($resource->isNeed() && $effectiveCompensation === Resource::FREE) {
+            return response()->json([
+                'message' => 'A need cannot be free. Choose Barter or Paid.',
+                'errors' => [
+                    'compensation_type' => ['A need cannot be free. Choose Barter or Paid.'],
+                ],
+            ], 422);
+        }
         // A replace-the-gallery request wipes the old files and stores the new
         // set; an absent gallery (neither `images` nor `image`) leaves the
         // photos untouched. image_path tracks the new cover.
@@ -236,9 +295,10 @@ class ListingController extends Controller
             $resource->image_paths = $gallery === [] ? null : $gallery;
         }
         // `status` is excluded from mass-assignment for the same reason: it is
-        // applied explicitly below under the closed-only rule above.
+        // applied explicitly below under the closed-only rule above. `type` is
+        // excluded too — the direction is immutable (checked above).
         $resource->fill(collect($validated)
-            ->except(['category', 'image', 'images', 'compensation_type', 'price', 'price_negotiable', 'status'])
+            ->except(['category', 'image', 'images', 'compensation_type', 'price', 'price_negotiable', 'status', 'type'])
             ->all());
         if (array_key_exists('category', $validated)) {
             $resource->category_id = Category::findOrCreateByName($validated['category'] ?: 'Tools')->id;
@@ -276,10 +336,15 @@ class ListingController extends Controller
         // "Price negotiable" is a paid-only attribute: keep it in step with the
         // compensation so a listing that becomes a gift/trade never keeps
         // offering a counter-offer it cannot honour.
-        if ($resource->compensationType() !== Resource::PAID) {
+        if ($resource->compensationType() !== Resource::PAID || $resource->isNeed()) {
             $resource->price_negotiable = false;
         } elseif (array_key_exists('price_negotiable', $validated)) {
             $resource->price_negotiable = (bool) $validated['price_negotiable'];
+        }
+        // "How much is needed" belongs to a NEED only; an offer is one thing
+        // the member already owns, so the field is cleared rather than kept.
+        if (! $resource->isNeed()) {
+            $resource->quantity = null;
         }
         // A status change is an owner action, allowed only while the listing is
         // in an owner-controlled lifecycle state. Anything a moderator has
