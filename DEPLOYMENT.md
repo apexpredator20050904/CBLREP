@@ -6,6 +6,36 @@ This deploys **only the React/Vite admin console** (`frontend/`). The Laravel AP
 
 ---
 
+## 0. Where the console is deployed, and what it talks to
+
+| | |
+| --- | --- |
+| **Console** | `https://cblrep-admin.vercel.app` (Vercel project `cblrep-admin`) |
+| **API it calls** | `https://contest-bunny-unsorted.ngrok-free.dev` — the reserved ngrok subdomain, for now |
+| **Why not `api.cblrep.ph`?** | That host is not serving: it accepts TCP on 80/443 but answers the TLS handshake with an `internal error` alert and returns an empty reply. The console points at the tunnel until the host is back. |
+
+**The console only works while this machine and the ngrok tunnel are running.**
+The tunnel is the API the deployment calls, so the laptop going to sleep takes
+the console down with it. That is the price of deploying before the production
+host is repaired.
+
+**To move it to the production API** (once `api.cblrep.ph` serves again):
+
+1. change the repository variable `VERCEL_API_BASE_URL` to `https://api.cblrep.ph`;
+2. push anything to `main` (or run the *Deploy console* workflow by hand).
+
+The value is inlined into the bundle **at build time**, so a redeploy is what
+makes it take effect. The `api.cblrep.ph` origin is already in the API's
+`allowed_origins`, so no CORS change is needed for that move.
+
+**CORS, once and for all:** Vercel cannot run PHP-FPM, so a console served
+from there calls the API cross-origin and the API must answer the preflight.
+`backend/config/cors.php` carries a `*.vercel.app` pattern for exactly that —
+it covers the production alias and every random preview deployment URL. A
+foreign origin still gets no `Access-Control-Allow-Origin`.
+
+---
+
 ## 1. Configuration (already in the repo)
 
 | File | Purpose |
@@ -27,7 +57,7 @@ Set this in **Vercel → Project → Settings → Environment Variables**:
 
 | Name | Example value | Scope |
 | --- | --- | --- |
-| `VITE_API_BASE_URL` | `https://api.your-domain.com` | Production (and Preview if you want previews talking to the same API) |
+| `VITE_API_BASE_URL` | `https://api.cblrep.ph` | Production (and Preview if you want previews talking to the same API) |
 
 - No trailing slash and **no** `/api` suffix — `src/services/adminApi.js` appends
   `/api` itself.
@@ -38,6 +68,10 @@ Set this in **Vercel → Project → Settings → Environment Variables**:
 
 Without `VITE_API_BASE_URL` the app falls back to same-origin `/api/*` and logs
 a console warning; pages load but all data requests fail.
+
+> On Vercel the value **must** be absolute. Vercel serves only static files —
+> there is no PHP-FPM to route a relative `/api/*` to, so an empty value means
+> every request 404s against the Vercel origin.
 
 ---
 
@@ -84,6 +118,26 @@ echo -n "https://api.your-domain.com" | npx --yes vercel@latest env add VITE_API
 
 Tip: `npm run deploy` shells out to the Vercel CLI, so `--prod` works when
 forwarded through npm.
+
+### 4.1 Option C — deployed by CI (what this repository uses)
+
+`.github/workflows/vercel.yml` deploys the console on every push to `main`.
+It links the project, writes `VITE_API_BASE_URL` as a **production
+environment variable** (so the value is inlined at build time), and deploys.
+
+| Where | Name | Kind |
+| --- | --- | --- |
+| Repository secret | `VERCEL_TOKEN` | A Vercel token (vercel.com → Account Settings → Tokens). |
+| Repository variable | `VERCEL_PROJECT` | `cblrep-admin` |
+| Repository variable | `VERCEL_API_BASE_URL` | The API the console calls. **Change this to move the console to another API**, then push. |
+| Repository variable | `VERCEL_ORG` | Only for a team account; a personal token needs no scope. |
+
+Until the token is set, the workflow reports that Vercel is not wired and
+stops — it does not fail every push. Once it is set, a broken deployment
+fails loudly.
+
+The project's own settings carry the root directory (`frontend`) and the SPA
+rewrite, so the console's `/admin/*` routes survive a hard refresh.
 
 ---
 
