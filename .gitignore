@@ -1,0 +1,33 @@
+# Local runtime artefacts of the monorepo.
+#
+# The three tiers carry their own .gitignore; this file covers the root and
+# anything that sits above a tier.
+
+# Local runtime logs and the defense backup package. The backups hold a
+# database dump and a secrets archive — they must never reach the repository.
+/storage/
+storage/
+
+# Secrets: every tier keeps its own .env out of git, and the root follows
+# the same rule.
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# Dependencies and build output
+node_modules/
+**/node_modules/
+**/dist/
+**/build/
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/vendor/
+**/.gradle/
+
+# Tooling
+.idea/
+.vscode/
+.DS_Store
+*.log
