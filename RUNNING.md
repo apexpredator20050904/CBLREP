@@ -197,7 +197,45 @@ Install, authtoken, and every place the generated URL must be updated are in
 
 ## 3. Admin Panel Setup (React + Vite)
 
-### 3.1 Install and configure
+### 3.1 The deployed console (the normal way to use it)
+
+The admin console is deployed on Vercel and is reached at a URL, not a
+terminal:
+
+| | |
+| --- | --- |
+| **URL** | `https://cblrep-frontend.vercel.app` |
+| **Sign in** | `admin@cblrep.ph` / `adminpass123`, then the 6-digit TOTP from your authenticator app |
+| **2FA enrolment** | The QR and the manual entry key are shown by the sign-in screen itself; the seeder also prints them (§2.4) |
+
+**The console's data comes from this machine**, through the ngrok tunnel, so
+two things have to be running for the panels to fill:
+
+```bash
+# 1 ── the API
+cd backend && php artisan serve --host=127.0.0.1 --port=8000
+
+# 2 ── the tunnel (the console's /api/* is proxied to it)
+cd backend && ngrok http 8000
+```
+
+If the tunnel is down, the page still loads but the sign-in is refused — the
+console cannot reach the API, so it signs you straight back out. Check the
+API first:
+
+```bash
+curl https://contest-bunny-unsorted.ngrok-free.dev/api/platform/status
+```
+
+A JSON answer means the stack is up; a hang, or ngrok's warning page, means
+the tunnel is not serving (§7.8).
+
+Every push to `main` redeploys the console, so there is nothing to run
+locally to "publish" it. How it is wired — the same-origin `/api/*` proxy, the
+environment variables, and how to move it to `api.cblrep.ph` when that host
+serves again — is in [`DEPLOYMENT.md`](DEPLOYMENT.md).
+
+### 3.2 Local development
 
 ```bash
 cd frontend
@@ -215,16 +253,19 @@ VITE_API_BASE_URL=
 VITE_API_TARGET=http://127.0.0.1:8000
 ```
 
-On **Vercel** this is inverted: set `VITE_API_BASE_URL` to the public API origin
-and leave `VITE_API_TARGET` unset. See `DEPLOYMENT.md`.
-
-### 3.2 Development
-
 ```bash
 npm run dev
 ```
 
 Vite binds `0.0.0.0:5173`, so other devices on the LAN can load the console too.
+
+On **Vercel** the value is **not** empty and it is **not** the API origin:
+it is the console's own origin (`https://cblrep-frontend.vercel.app`),
+because Vercel proxies `/api/*` to the tunnel with a rewrite. That is the
+same topology the production host uses, where nginx serves the static files
+and routes `/api/*` to PHP-FPM — and it means the browser makes no
+cross-origin request at all, so no CORS preflight happens. See
+`DEPLOYMENT.md`.
 
 ### 3.3 Production build verification
 
@@ -494,8 +535,13 @@ curl https://<subdomain>.ngrok-free.dev/api/platform/status
 - Keep **both** terminals open — closing either kills the endpoint.
 - On the free tier the subdomain changes every restart (reserve one on the
   ngrok dashboard to keep it stable).
-- If a browser shows ngrok's interstitial page, that is only for HTML
-  navigations; API calls with `Accept: application/json` pass straight through.
+- **ngrok's browser warning page intercepts browser GETs** — any request
+  whose User-Agent looks like a browser gets the "You are about to visit…"
+  HTML page instead of the API's JSON, whatever the `Accept` header says. The
+  mobile app is unaffected (its User-Agent is not a browser), but the **admin
+  console in a browser** is, which is why it sends
+  `ngrok-skip-browser-warning` on every request
+  (`frontend/src/services/adminApi.js`). A normal API ignores that header.
 
 ### 5.3 Where the ngrok URL must be updated
 
@@ -504,9 +550,10 @@ curl https://<subdomain>.ngrok-free.dev/api/platform/status
 | 1 | `backend/.env` → `APP_URL` | `https://<subdomain>.ngrok-free.dev` | **Always.** Drives `asset()` URLs (listing photos) and links — must match the origin clients actually call. Then run `php artisan config:clear`. |
 | 2 | Flutter `--dart-define=CBLREP_API_URL` (or `./build_release.sh <url>`) | the same URL, no trailing slash (`/api` is appended automatically) | Every `flutter run` / APK build once the host changes — the URL is **compiled into the binary**. |
 | 3 | `frontend/.env` → `VITE_API_BASE_URL` | **leave empty** for `npm run dev` | Never changes for local dev: requests stay same-origin and the Vite proxy forwards them to `VITE_API_TARGET=http://127.0.0.1:8000`, which keeps working while the tunnel is up. |
-| 4 | `backend/config/cors.php` | **no edit needed** | ngrok hostnames are already allowed by `allowed_origins_patterns` (`*.ngrok-free.app`, `*.ngrok-free.dev`, `*.ngrok.app`, `*.ngrok.io`). |
-| 5 | `backend/.env` → `APP_APK_URL` / `APP_APK_SHA256` | **leave empty** on a dev/ngrok backend | Otherwise `GET /api/app-version` triggers the in-app update prompt pointing at a stale APK. |
-| 6 | `backend/.env` → Firebase (`FIREBASE_CREDENTIALS`) | unchanged | Push works over the tunnel as-is. |
+| 4 | The **deployed** console → `VITE_API_BASE_URL` on the Vercel project (`cblrep-frontend`) | `https://cblrep-frontend.vercel.app` — the console's **own** origin | When the console is served from Vercel its `/api/*` is proxied to the tunnel by a rewrite, so the browser never calls the tunnel directly. Change it in Vercel → the project → Settings → Environment Variables, then redeploy — the value is inlined at build time. |
+| 5 | `backend/config/cors.php` | **no edit needed** | ngrok hostnames are already allowed by `allowed_origins_patterns` (`*.ngrok-free.app`, `*.ngrok-free.dev`, `*.ngrok.app`, `*.ngrok.io`), and the `*.vercel.app` pattern covers a console pointed straight at the API. The deployed console is same-origin and makes no cross-origin call at all. |
+| 6 | `backend/.env` → `APP_APK_URL` / `APP_APK_SHA256` | the published release asset | These describe the APK the app's update prompt offers. The release workflow (`.github/workflows/release.yml`) sets them on the server when a `v*` tag is published, so a dev backend left with stale values would point the app at an old build — blank them on a throwaway backend, or let the workflow keep them current. |
+| 7 | `backend/.env` → Firebase (`FIREBASE_CREDENTIALS`) | unchanged | Push works over the tunnel as-is. |
 
 After touching `backend/.env`:
 
@@ -520,9 +567,18 @@ php artisan config:clear        # or config:cache if you cache config
 1. `backend/.env` → new `APP_URL` + `php artisan config:clear`
 2. Rebuild/re-run the Flutter client with the new `CBLREP_API_URL`
    (`flutter run …` or `./build_release.sh https://<subdomain>.ngrok-free.dev`)
-3. Web console: nothing to do (it never hardcodes the API origin in dev mode)
+3. Web console: nothing to do — the dev server proxies `/api` to
+   `127.0.0.1:8000`, and the **deployed** console reaches the tunnel through
+   Vercel's rewrite, which names the tunnel host itself. If you move the
+   console to a different API, that is a Vercel environment variable plus a
+   redeploy (§5.3 row 4).
 
-### 5.4 Sharing the admin console through ngrok (optional)
+### 5.4 The admin console through a second tunnel (only for testing a local build)
+
+The console normally needs **no tunnel of its own** — it is deployed on
+Vercel and reaches the API through the tunnel the API is already on (§3.1).
+A second tunnel is only useful when you want to open a **local** build from
+another device:
 
 ```bash
 ngrok http 5173     # second tunnel for the Vite dev server
@@ -536,37 +592,42 @@ to `127.0.0.1:8000` — no extra configuration either way.
 
 ## 6. Running the Clients
 
-The full local loop — four terminals:
+The full local loop — three terminals, plus one URL:
 
 ```bash
 # 1 ── backend
 cd backend && php artisan serve --host=127.0.0.1 --port=8000
 
-# 2 ── public tunnel (phones / other machines)
+# 2 ── public tunnel (phones / other machines / the deployed console)
 cd backend && ngrok http 8000
 
-# 3 ── admin console (open in this machine's browser)
-cd frontend && npm run dev          # http://localhost:5173
-
-# 4 ── mobile app (debug build against the tunnel)
+# 3 ── mobile app (debug build against the tunnel)
 cd mobile
 flutter run -d <device_id> --dart-define=CBLREP_API_URL=https://<subdomain>.ngrok-free.dev
 ```
+
+The admin console is the fourth piece and it is a **URL**, not a terminal:
+`https://cblrep-frontend.vercel.app` (§3.1). It reaches the API through the
+tunnel from step 2, so that tunnel has to be up.
 
 ### 6.1 Web admin dashboard
 
 | Mode | Command | Open at |
 | --- | --- | --- |
-| Local dev (recommended) | `cd frontend && npm run dev` | `http://localhost:5173` |
+| **Deployed (the normal one)** | nothing — a push to `main` deploys it | `https://cblrep-frontend.vercel.app` |
+| Local dev | `cd frontend && npm run dev` | `http://localhost:5173` |
 | Another device on the LAN | same command — Vite binds `0.0.0.0:5173` | `http://<LAN_IP>:5173` |
-| Anywhere via ngrok | `ngrok http 5173` (§5.4) | `https://<subdomain>.ngrok-free.dev` |
+| A local build from another device | `ngrok http 5173` (§5.4) | `https://<subdomain>.ngrok-free.dev` |
 | Production bundle, locally | `npm run build && npm run start` | `http://localhost:4173` |
 
-In every local mode `VITE_API_BASE_URL` stays **empty**: requests are relative
-`/api/*` and the Vite proxy forwards them to `VITE_API_TARGET`
+In the **local** modes `VITE_API_BASE_URL` stays **empty**: requests are
+relative `/api/*` and the Vite proxy forwards them to `VITE_API_TARGET`
 (`http://127.0.0.1:8000`), so the ngrok URL never has to be configured in the
-frontend. Sign in with `admin@cblrep.ph` / `adminpass123` plus the TOTP code
-printed by the seeder (§2.4).
+frontend. The **deployed** console is same-origin on Vercel and its `/api/*` is
+proxied to the tunnel by a rewrite (§3.2, `DEPLOYMENT.md`).
+
+Sign in with `admin@cblrep.ph` / `adminpass123` plus the TOTP code from your
+authenticator app (§2.4, §3.1).
 
 ### 6.2 Mobile client
 
@@ -782,9 +843,39 @@ POST /api/admin/2fa/verify → stage 2: TOTP code, returns the Sanctum token
 With `MAIL_MAILER=log`, password-reset codes are readable in
 `backend/storage/logs/laravel.log`.
 
+### 7.8 The console signs me out, or its tables stay empty
+
+The deployed console (`https://cblrep-frontend.vercel.app`) reads its data
+from **this machine** through the ngrok tunnel, so a stopped tunnel looks
+exactly like a broken console: the page loads, the sign-in is accepted and
+then refused, and the panels stay empty.
+
+Check the stack from the outside in:
+
+```bash
+# 1. the API through the tunnel
+curl https://contest-bunny-unsorted.ngrok-free.dev/api/platform/status
+
+# 2. the console's own /api, which Vercel proxies to the tunnel
+curl https://cblrep-frontend.vercel.app/api/platform/status
+```
+
+- **No answer from (1)** → the tunnel or the API is down. Restart
+  `php artisan serve` and `ngrok http 8000` (§3.1).
+- **(1) answers but (2) does not** → Vercel is not proxying — check that
+  `frontend/vercel.json` still has the `/api/*` rewrite, and that the
+  deployment on Vercel is the current one.
+- **Both answer, but the sign-in is refused** → you are being rate-limited:
+  the admin sign-in allows 10 attempts per minute per account (§7.6). Wait a
+  minute, and check the TOTP code is current — a stale code fails exactly
+  like a wrong password.
+
+If the console shows ngrok's "You are about to visit…" page, the request
+reached the tunnel as a browser GET without the bypass header (§5.2).
+
 ---
 
-## 7.8 Continuous integration and delivery
+## 8. Continuous integration and delivery
 
 Every push and pull request is tested by GitHub Actions, and a `v*` tag
 publishes a signed APK. The full runbook — the branches, the workflows, the
@@ -806,7 +897,7 @@ gate runs on its own.
 
 ---
 
-## 8. Quick Reference
+## 9. Quick Reference
 
 ```bash
 # ── Backend ──────────────────────────────────────────────
@@ -815,6 +906,7 @@ php artisan serve --host=127.0.0.1 --port=8000
 ngrok http 8000                      # public HTTPS tunnel (§5)
 
 # ── Admin console ────────────────────────────────────────
+# Deployed: https://cblrep-frontend.vercel.app  (a push to main redeploys it)
 cd frontend
 npm run dev                       # :5173, proxied to the API
 npm run check                     # lint + production build
@@ -832,8 +924,9 @@ adb install -r build/app/outputs/flutter-apk/app-release.apk
 
 | Service | URL |
 | --- | --- |
+| **Admin console (deployed)** | **`https://cblrep-frontend.vercel.app`** (§3.1) |
 | Laravel API (local) | `http://127.0.0.1:8000/api` |
-| Laravel API (ngrok) | `https://<subdomain>.ngrok-free.dev/api` |
+| Laravel API (ngrok) | `https://contest-bunny-unsorted.ngrok-free.dev/api` |
 | API health | `…/api/platform/status` |
 | Admin dev server | `http://localhost:5173` |
 | Seeded admin | `admin@cblrep.ph` / `adminpass123` (+ TOTP from seeder output) |
