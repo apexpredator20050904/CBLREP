@@ -55,6 +55,15 @@ return [
         '#^https://[a-z0-9-]+\.ngrok-free\.dev$#',
         '#^https://[a-z0-9-]+\.ngrok\.app$#',
         '#^https://[a-z0-9-]+\.ngrok\.io$#',
+        // The admin console served from Vercel. The pattern covers the
+        // project's production alias (cblrep-admin.vercel.app) AND every
+        // random preview deployment URL Vercel hands out per deployment, so
+        // a preview does not need this file edited for it.
+        //
+        // Vercel cannot run PHP-FPM, so a console served from there calls
+        // the API cross-origin and the API has to answer the preflight —
+        // without this entry every request is blocked before it is made.
+        '#^https://[a-z0-9-]+\.vercel\.app$#',
     ],
 
     'allowed_headers' => ['*'],
