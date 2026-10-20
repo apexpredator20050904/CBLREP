@@ -116,11 +116,21 @@ cd mobile
 ## Background
 
 The portal is **direct bartering only** — no freecycling, no temporary
-lending. The decision and the reasoning behind it are recorded in
-[`docs/REFACTOR_BARTER_ONLY.md`](docs/REFACTOR_BARTER_ONLY.md): a barter is
-inherently two-sided, so the schema carries `offered_resource_id` and
-`offered_item`, which makes *"give an item away for free"* structurally
-impossible rather than merely hidden behind a dropdown.
+lending. The decision was made on 29 September 2026 and it rests on one
+architectural point: **a barter is inherently two-sided — both parties give
+something.** The schema therefore records what the poster wants *and* what
+the other side puts up (`offered_resource_id` and `offered_item`), so a trade
+provably has goods on both sides.
+
+That makes *"give an item away for free"* **structurally impossible** rather
+than merely hidden behind a dropdown. A panel member who asks "can someone
+give an item away for free?" gets: *"no — the form requires what you're
+offering in return, and the database rejects null."*
+
+The rule lives in the code, not only in this paragraph:
+[`backend/app/Models/Exchange.php`](backend/app/Models/Exchange.php) explains
+it, `ExchangeController` enforces it on every request — a hand-crafted one
+included — and `BarterCollapseTest` pins it down in CI on every push.
 
 ## CI and releases
 
