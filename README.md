@@ -1,17 +1,33 @@
-# untitled1
+# CBLREP — Member app (Flutter)
 
-A new Flutter project.
+The Android app members use to post what they have and what they need, trade
+with their neighbours, message each other and follow their listings.
 
-## Getting Started
+| | |
+| --- | --- |
+| **Branch** | `flutter-app` — the source of truth for `mobile/` in the monorepo |
+| **Stack** | Flutter · Dart 3.12 · Provider |
+| **Docs** | [RUNNING.md](https://github.com/apexpredator20050904/CBLREP/blob/main/RUNNING.md) · [BUILD.md](https://github.com/apexpredator20050904/CBLREP/blob/main/mobile/BUILD.md) |
 
-This project is a starting point for a Flutter application.
+## Run it
 
-A few resources to get you started if this is your first Flutter project:
+```bash
+flutter pub get
+flutter run -d <device_id> --dart-define=CBLREP_API_URL=https://<subdomain>.ngrok-free.dev
+```
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+The API host is **compiled into the binary**, so it is baked in at build time.
+Debug builds probe the candidates in order (`CBLREP_API_URL` → the LAN →
+emulator/loopback); a release build honours only the URL it was given.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Build a distributable APK
+
+```bash
+./build_release.sh https://api.cblrep.ph     # or an ngrok subdomain
+adb install -r build/app/outputs/flutter-apk/app-release.apk
+```
+
+The release is signed with the keystore in `android/` — see
+[BUILD.md](https://github.com/apexpredator20050904/CBLREP/blob/main/mobile/BUILD.md)
+for the signing details, and the full runbook is in
+[RUNNING.md](https://github.com/apexpredator20050904/CBLREP/blob/main/RUNNING.md).
