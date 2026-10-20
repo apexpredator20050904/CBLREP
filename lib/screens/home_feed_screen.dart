@@ -157,20 +157,47 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
     if (mounted) refresh();
   }
 
-  /// The card's "Propose Barter" fast action: the same two-sided proposal
-  /// the details screen offers, opened straight from the feed.
+  /// The card's fast action.
+  ///
+  /// Only a BARTER has a return side to put up, so that is the one case the
+  /// feed can settle without a detour: the same two-sided proposal the
+  /// details screen offers, opened straight from the card. A gift and a sale
+  /// are settled in the details screen (claim it / buy it), so the card's
+  /// action takes the member there instead of opening a proposal sheet that
+  /// would ask for a return side the listing does not have.
+  Future<void> _quickAction(ListingModel listing) async {
+    if (!listing.isBarter) {
+      await _openListing(listing);
+      return;
+    }
+    await _proposeBarter(listing);
+  }
+
+  /// The card's fast action for a barter: the same two-sided proposal the
+  /// details screen offers, opened straight from the feed. On a NEED the
+  /// wording flips — the reader is the supplier ("I have this"), not the
+  /// demander.
   Future<void> _proposeBarter(ListingModel listing) async {
+    final isNeed = listing.isNeed;
     if (listing.ownerId <= 0) {
       if (mounted) {
-        feedback.Feedback.info(context, 'Trade offers are unavailable for this listing.');
+        feedback.Feedback.info(context, isNeed
+            ? 'This request cannot be answered here.'
+            : 'Trade offers are unavailable for this listing.');
       }
       return;
     }
-    if (!await ensureSignedIn(context, 'send a trade offer for this listing')) return;
+    if (!await ensureSignedIn(context, isNeed
+        ? 'offer what you have for this request'
+        : 'send a trade offer for this listing')) {
+      return;
+    }
     if (!mounted) return;
     final sent = await showTradeOfferSheet(context, listing);
     if (sent && mounted) {
-      feedback.Feedback.success(context, 'Trade offer sent. Track it in Exchanges.');
+      feedback.Feedback.success(context, isNeed
+          ? 'Sent. The poster will review what you can bring.'
+          : 'Trade offer sent. Track it in Exchanges.');
     }
   }
 
@@ -448,7 +475,7 @@ class _HomeFeedScreenState extends State<HomeFeedScreen> {
                             listing: listing,
                             onTap: () => _openListing(listing),
                             onViewDetails: () => _openListing(listing),
-                            onPropose: () => _proposeBarter(listing),
+                            onPropose: () => _quickAction(listing),
                             onReport: () => _reportListing(listing),
                             onOwnerTap: () => _openMember(listing),
                             // The distance only earns its place when the

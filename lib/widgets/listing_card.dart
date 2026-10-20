@@ -60,12 +60,16 @@ class ListingCard extends StatelessWidget {
   static Color compensationColor(String type) => CblrepColors.compensationColor(type);
 
   /// "PAID · ₱250" style caption, or the bare label for free/barter.
+  ///
+  /// On a NEED the price is the poster's budget ceiling, so the caption says
+  /// "BUDGET" rather than "PAID" — the two are not the same promise.
   String get compensationCaption {
     if (listing.isPaid && listing.price != null) {
       final whole = listing.price == listing.price!.roundToDouble();
       final formatted =
           whole ? listing.price!.toStringAsFixed(0) : listing.price!.toStringAsFixed(2);
-      return '${listing.compensationLabel} · ₱$formatted';
+      final label = listing.isBudget ? 'BUDGET' : listing.compensationLabel;
+      return '$label · ₱$formatted';
     }
     return listing.compensationLabel;
   }
@@ -85,8 +89,15 @@ class ListingCard extends StatelessWidget {
   /// scratches"), but a badge has to be short enough to sit over a photo, so
   /// the common words are mapped onto the three labels a buyer actually
   /// scans for. Anything unrecognised falls back to the member's own words.
+  ///
+  /// On a NEED the condition is what the poster is willing to ACCEPT, so the
+  /// badge reads "Any / Like new / Working" rather than the item's state.
   String get _conditionBadge {
     final raw = listing.condition.trim();
+    if (listing.conditionIsRequirement) {
+      if (raw.isEmpty) return 'Any';
+      return raw.length > 18 ? '${raw.substring(0, 17)}…' : raw;
+    }
     final lower = raw.toLowerCase();
     if (lower.contains('like new') || lower == 'new') return 'Like New';
     if (lower.contains('fair') || lower.contains('poor')) return 'Fair';
@@ -96,17 +107,22 @@ class ListingCard extends StatelessWidget {
   }
 
   /// The label of the secondary action, matched to how the owner shares.
+  ///
+  /// The direction matters as much as the compensation: on a NEED the
+  /// neighbour is the SUPPLIER, so the action is "I have this" (or "I can
+  /// supply it" when the poster is paying) — never the offer-side wording of
+  /// an OFFER.
   String get _proposeLabel => switch (listing.compensationType) {
         'free' => 'Claim Item',
-        'paid' => 'Make Offer',
-        _ => 'Propose Barter',
+        'paid' => isNeed ? 'I Can Supply' : 'Make Offer',
+        _ => isNeed ? 'I Have This' : 'Propose Barter',
       };
 
   /// The icon of the secondary action, matched to how the owner shares.
   IconData get _proposeIcon => switch (listing.compensationType) {
         'free' => Icons.redeem_outlined,
         'paid' => Icons.local_offer_outlined,
-        _ => Icons.swap_horiz,
+        _ => isNeed ? Icons.inventory_2_outlined : Icons.swap_horiz,
       };
 
   /// Centered watermark shown while a listing has no usable photo.
@@ -236,7 +252,7 @@ class ListingCard extends StatelessWidget {
                   // scanning for a trade, so it gets its own line.
                   if (listing.hasWantedItem) ...[
                     const SizedBox(height: 6),
-                    _WantedTag(item: listing.wantedItem!),
+                    _WantedTag(item: listing.wantedItem!, isOffer: listing.wantedIsOffer),
                   ],
                   const SizedBox(height: 8),
                   // Owner on their own line: a small photo (or initials) plus
@@ -412,7 +428,11 @@ class _ConditionTag extends StatelessWidget {
 /// "WANTED FOR BARTER: 5 kg of rice" — the owner's return wish.
 class _WantedTag extends StatelessWidget {
   final String item;
-  const _WantedTag({required this.item});
+
+  /// True when the listing is a NEED, where this text is what the poster can
+  /// offer in return rather than what they want.
+  final bool isOffer;
+  const _WantedTag({required this.item, this.isOffer = false});
 
   @override
   Widget build(BuildContext context) {
@@ -435,7 +455,7 @@ class _WantedTag extends StatelessWidget {
               TextSpan(
                 children: [
                   TextSpan(
-                    text: 'WANTED FOR BARTER: ',
+                    text: isOffer ? 'CAN OFFER IN RETURN: ' : 'WANTED FOR BARTER: ',
                     style: TextStyle(
                       fontSize: 9.5,
                       fontWeight: FontWeight.w900,

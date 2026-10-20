@@ -139,8 +139,25 @@ class ListingModel {
 
   /// What the owner wants back — the return side of a barter. Null for free
   /// and paid listings, which have no return side.
+  ///
+  /// On a NEED this reads the other way round: it is what the POSTER can
+  /// trade in return. See [wantedItemRole].
   final String? wantedItem;
   final double? price;
+
+  /// Which reading applies to the shared columns. A NEED reads them from the
+  /// other end — its price is the poster's budget ceiling, its wanted item is
+  /// what the poster can offer, its condition is what the poster can accept
+  /// and its photos are references of the thing wanted.
+  ///
+  /// The API publishes these so no client has to guess from the raw value.
+  final String priceRole;
+  final String wantedItemRole;
+  final String conditionRole;
+  final String imagesRole;
+
+  /// How much is needed — "5 kg of rice". Only meaningful on a NEED.
+  final String? quantity;
 
   /// Paid-only: the owner welcomes a counter-offer, so the app shows
   /// "Negotiable" and a "Make an offer" action. Always false for free/barter
@@ -183,6 +200,11 @@ class ListingModel {
     this.compensationLabel = 'BARTER',
     this.wantedItem,
     this.price,
+    this.priceRole = 'asking',
+    this.wantedItemRole = 'wants_in_return',
+    this.conditionRole = 'item_state',
+    this.imagesRole = 'item_photos',
+    this.quantity,
     this.priceNegotiable = false,
     required this.category,
     required this.condition,
@@ -208,6 +230,25 @@ class ListingModel {
   /// True when a buyer should be offered the "Make an offer" route: a priced
   /// sale whose owner welcomes a counter-offer.
   bool get isNegotiable => isPaid && priceNegotiable;
+
+  // ── Direction: OFFER vs NEED ──────────────────────────────────────────
+
+  /// True when this is a NEED ("I am looking for something") rather than an
+  /// OFFER ("I have something to share").
+  bool get isNeed => type == 'request';
+
+  /// The price is the poster's budget ceiling rather than an asking price.
+  bool get isBudget => isNeed && priceRole == 'budget';
+
+  /// The wanted item is what the poster can trade, not what the owner wants.
+  bool get wantedIsOffer => isNeed && wantedItemRole == 'offers_in_return';
+
+  /// The condition states what the poster can accept, not the item's state.
+  bool get conditionIsRequirement =>
+      isNeed && conditionRole == 'acceptable_condition';
+
+  /// The photos are references of the thing wanted, not photos of the item.
+  bool get photosAreReferences => isNeed && imagesRole == 'reference_photos';
 
   // ── Lifecycle status ─────────────────────────────────────────────────
   bool get isActiveStatus => status == 'active';
@@ -250,6 +291,14 @@ class ListingModel {
           'BARTER',
       wantedItem: (json['wanted_item'] as String?)?.trim(),
       price: _asDouble(json['price']),
+      // Which reading applies to the shared columns. Defaults match an OFFER,
+      // so a payload from an older API keeps its old meaning.
+      priceRole: (json['price_role'] as String?) ?? 'asking',
+      wantedItemRole: (json['wanted_item_role'] as String?) ?? 'wants_in_return',
+      conditionRole:
+          (json['condition_role'] as String?) ?? 'item_state',
+      imagesRole: (json['images_role'] as String?) ?? 'item_photos',
+      quantity: (json['quantity'] as String?)?.trim(),
       // Only a paid listing can be negotiable; the server already normalises
       // this, but guard the flag here so a stale/foreign payload cannot make a
       // gift or a trade look open to offers.

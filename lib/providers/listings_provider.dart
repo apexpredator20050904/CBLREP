@@ -177,6 +177,7 @@ class ListingsProvider extends ChangeNotifier {
     double? price,
     bool priceNegotiable = false,
     String? wantedItem,
+    String? quantity,
     double? latitude,
     double? longitude,
     List<File> images = const [],
@@ -186,15 +187,16 @@ class ListingsProvider extends ChangeNotifier {
       title: InputSanitizer.text(title, max: 120),
       type: type,
       description: InputSanitizer.text(description, max: 2000),
-      category: category,
-      condition: condition,
+      category: InputSanitizer.text(category, max: 60),
+      condition: InputSanitizer.text(condition, max: 60),
       location: InputSanitizer.clean(location),
       barangay: barangay,
       purokSitio: InputSanitizer.clean(purokSitio),
       compensationType: compensationType,
       price: price,
-      // Paid-only: the seller welcomes a counter-offer.
-      priceNegotiable: priceNegotiable,
+      // Paid-only: the seller welcomes a counter-offer. A NEED's price is a
+      // budget ceiling, which is not negotiable against itself.
+      priceNegotiable: type != 'request' && priceNegotiable,
       // Exact pin, when the poster dropped one.
       latitude: latitude,
       longitude: longitude,
@@ -202,6 +204,10 @@ class ListingsProvider extends ChangeNotifier {
       // backend nulls it for them regardless.
       wantedItem: compensationType == 'barter' && (wantedItem?.isNotEmpty ?? false)
           ? InputSanitizer.text(wantedItem!, max: 160)
+          : null,
+      // NEED-only: how much is needed ("5 kg of rice").
+      quantity: type == 'request' && (quantity?.isNotEmpty ?? false)
+          ? InputSanitizer.text(quantity!, max: 60)
           : null,
       // Ordered photo gallery; the first becomes the cover.
       images: images,

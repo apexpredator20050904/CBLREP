@@ -16,6 +16,13 @@ import '../theme/cblrep_theme.dart';
 /// It replaces the old detail-screen free-text barter form with something that
 /// reflects what really happens: you point at a thing you own, or you name what
 /// you can give, and you agree where to hand it over.
+///
+/// The same sheet serves both directions, with the wording mirrored:
+///
+///   OFFER → you are the DEMANDER: "I have something, what do you want back?"
+///   NEED  → you are the SUPPLIER: "I have what you need — what would you want
+///            in return?" The return side is prefilled from what the poster
+///            offered to trade.
 class TradeOfferSheet extends StatefulWidget {
   final ListingModel listing;
   const TradeOfferSheet({super.key, required this.listing});
@@ -43,9 +50,17 @@ class TradeOfferSheetState extends State<TradeOfferSheet> {
       if (trinidadBarangays.contains(user.barangay)) _barangay = user.barangay;
       _purok.text = user.purokSitio;
     }
-    // Prefer the pick-a-listing path when the member already has something to
-    // offer; otherwise the free-text path is the only one that can work.
-    if (_ownOfferable().isNotEmpty) _mode = 'listing';
+    // On a NEED the reader is the SUPPLIER: they bring what the poster wants
+    // and ask for the poster's side in return, which the poster already named
+    // on the listing. Prefilling it saves the member from retyping it.
+    if (widget.listing.isNeed && (widget.listing.wantedItem ?? '').isNotEmpty) {
+      _describe.text = widget.listing.wantedItem!;
+      _mode = 'describe';
+    } else if (_ownOfferable().isNotEmpty) {
+      // Prefer the pick-a-listing path when the member already has something to
+      // offer; otherwise the free-text path is the only one that can work.
+      _mode = 'listing';
+    }
   }
 
   @override
@@ -74,7 +89,9 @@ class TradeOfferSheetState extends State<TradeOfferSheet> {
       return 'Choose which of your listings to offer.';
     }
     if (_mode == 'describe' && offeredItem.isEmpty) {
-      return 'Describe what you will offer in return.';
+      return widget.listing.isNeed
+          ? 'Say what you would like in return for bringing this.'
+          : 'Describe what you will offer in return.';
     }
     final purok = _purok.text.trim();
     if (purok.isEmpty || !isValidPurokSitio(purok)) {
@@ -122,6 +139,11 @@ class TradeOfferSheetState extends State<TradeOfferSheet> {
     final own = _ownOfferable();
     final foreground = dark ? Colors.white : Colors.black;
     final muted = dark ? Colors.white70 : Colors.black54;
+    // On a NEED the reader is the SUPPLIER — they bring what the poster wants
+    // and ask for the poster's side in return, so the whole sheet is worded
+    // from that side of the table.
+    final isNeed = widget.listing.isNeed;
+    final quantity = (widget.listing.quantity ?? '').trim();
 
     return Padding(
       // Lift the sheet above the keyboard so the purok field stays visible.
@@ -148,34 +170,52 @@ class TradeOfferSheetState extends State<TradeOfferSheet> {
                   ),
                 ),
               ),
-              Text('Make a trade offer', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: foreground)),
+              Text(
+                isNeed ? 'I have this' : 'Make a trade offer',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: foreground),
+              ),
               const SizedBox(height: 4),
-              Text('For “${widget.listing.title}”', style: TextStyle(fontSize: 12, color: muted)),
+              Text(
+                isNeed
+                    ? 'They need “${widget.listing.title}”${quantity.isNotEmpty ? ' ($quantity)' : ''}'
+                    : 'For “${widget.listing.title}”',
+                style: TextStyle(fontSize: 12, color: muted),
+              ),
               if (widget.listing.hasWantedItem) ...[
                 const SizedBox(height: 6),
                 Text(
-                  'Owner wants: ${widget.listing.wantedItem}',
+                  isNeed
+                      ? 'They offered in return: ${widget.listing.wantedItem}'
+                      : 'Owner wants: ${widget.listing.wantedItem}',
                   style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: CblrepColors.compBarter),
                 ),
               ],
               const SizedBox(height: 16),
-              Text('What you give in return', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: foreground)),
+              Text(
+                isNeed ? 'What you would like in return' : 'What you give in return',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: foreground),
+              ),
               const SizedBox(height: 8),
               // Not a required-choice widget: either path alone satisfies the
               // two-sided rule, so a member without a spare listing can still
               // trade a skill.
-              SegmentedButton<String>(
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(value: 'listing', label: Text('My listing'), icon: Icon(Icons.inventory_2_outlined, size: 16)),
-                  ButtonSegment(value: 'describe', label: Text('Describe it'), icon: Icon(Icons.edit_outlined, size: 16)),
-                ],
-                selected: {_mode},
-                onSelectionChanged: (value) => setState(() {
-                  _mode = value.first;
-                  _error = null;
-                }),
-              ),
+              //
+              // On a NEED the return side belongs to the POSTER, so there is
+              // no "my listing" to pick — the supplier states in words what
+              // they will take, prefilled from what the poster offered.
+              if (!isNeed)
+                SegmentedButton<String>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: 'listing', label: Text('My listing'), icon: Icon(Icons.inventory_2_outlined, size: 16)),
+                    ButtonSegment(value: 'describe', label: Text('Describe it'), icon: Icon(Icons.edit_outlined, size: 16)),
+                  ],
+                  selected: {_mode},
+                  onSelectionChanged: (value) => setState(() {
+                    _mode = value.first;
+                    _error = null;
+                  }),
+                ),
               const SizedBox(height: 12),
               if (_mode == 'listing')
                 if (own.isEmpty)
@@ -197,7 +237,14 @@ class TradeOfferSheetState extends State<TradeOfferSheet> {
                 TextField(
                   controller: _describe,
                   maxLength: 160,
-                  decoration: const InputDecoration(labelText: 'e.g. 5 kg of rice, or an hour of plumbing help'),
+                  decoration: InputDecoration(
+                    labelText: isNeed
+                        ? 'What the poster offered in return (adjust if you agree to something else)'
+                        : 'e.g. 5 kg of rice, or an hour of plumbing help',
+                    helperText: isNeed
+                        ? 'They named this on the request — change it only if you would rather take something else.'
+                        : null,
+                  ),
                 ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
@@ -227,7 +274,11 @@ class TradeOfferSheetState extends State<TradeOfferSheet> {
                 child: FilledButton.icon(
                   onPressed: _sending ? null : _send,
                   icon: const Icon(Icons.send_outlined, size: 18),
-                  label: Text(_sending ? 'Sending…' : 'Send offer'),
+                  label: Text(
+                    _sending
+                        ? 'Sending…'
+                        : (widget.listing.isNeed ? 'Send it' : 'Send offer'),
+                  ),
                 ),
               ),
             ],

@@ -611,6 +611,7 @@ class ApiService {
     double? price,
     bool priceNegotiable = false,
     String? wantedItem,
+    String? quantity,
     double? latitude,
     double? longitude,
     List<File> images = const [],
@@ -638,9 +639,13 @@ class ApiService {
       // backend's `boolean` rule rejects.
       if (compensationType == 'paid')
         'price_negotiable': priceNegotiable ? 1 : 0,
-      // Barter-only return side ("what I want in return").
+      // Barter-only return side ("what I want in return" on an offer,
+      // "what I can offer in return" on a need).
       if (compensationType == 'barter' && wantedItem != null && wantedItem.trim().isNotEmpty)
         'wanted_item': wantedItem.trim(),
+      // NEED-only: how much is needed ("5 kg of rice").
+      if (type == 'request' && quantity != null && quantity.trim().isNotEmpty)
+        'quantity': quantity.trim(),
     };
     // Build the multipart body by hand so the photo gallery is sent as repeated
     // `images[]` fields, which Laravel parses into the `images` array. The first
