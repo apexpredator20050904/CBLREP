@@ -10,7 +10,7 @@ This deploys **only the React/Vite admin console** (`frontend/`). The Laravel AP
 
 | | |
 | --- | --- |
-| **Console** | `https://cblrep-admin.vercel.app` (Vercel project `cblrep-admin`) |
+| **Console** | `https://cblrep-frontend.vercel.app` (Vercel project `cblrep-frontend`, deployed by the Git integration) |
 | **API it calls** | `https://contest-bunny-unsorted.ngrok-free.dev` — the reserved ngrok subdomain, for now |
 | **Why not `api.cblrep.ph`?** | That host is not serving: it accepts TCP on 80/443 but answers the TLS handshake with an `internal error` alert and returns an empty reply. The console points at the tunnel until the host is back. |
 
@@ -119,25 +119,37 @@ echo -n "https://api.your-domain.com" | npx --yes vercel@latest env add VITE_API
 Tip: `npm run deploy` shells out to the Vercel CLI, so `--prod` works when
 forwarded through npm.
 
-### 4.1 Option C — deployed by CI (what this repository uses)
+### 4.1 The projects on this repository
 
-`.github/workflows/vercel.yml` deploys the console on every push to `main`.
-It links the project, writes `VITE_API_BASE_URL` as a **production
-environment variable** (so the value is inlined at build time), and deploys.
+The repository is connected to a Vercel team (`team-jesus7`) with **two**
+projects, both deployed by the Git integration on every push:
 
-| Where | Name | Kind |
+| Project | Serves | State |
 | --- | --- | --- |
-| Repository secret | `VERCEL_TOKEN` | A Vercel token (vercel.com → Account Settings → Tokens). |
-| Repository variable | `VERCEL_PROJECT` | `cblrep-admin` |
-| Repository variable | `VERCEL_API_BASE_URL` | The API the console calls. **Change this to move the console to another API**, then push. |
-| Repository variable | `VERCEL_ORG` | Only for a team account; a personal token needs no scope. |
+| `cblrep-frontend` | The admin console | The deployment to fix — see below. |
+| `cblrep` | The repository root | The root is the monorepo (`backend/`, `frontend/`, `mobile/`) and holds no app of its own, so this project has nothing to build. It can be left alone or removed from the team. |
 
-Until the token is set, the workflow reports that Vercel is not wired and
-stops — it does not fail every push. Once it is set, a broken deployment
-fails loudly.
+**`cblrep-frontend` needs three settings**, and the first two are what make
+its deployment fail:
 
-The project's own settings carry the root directory (`frontend`) and the SPA
-rewrite, so the console's `/admin/*` routes survive a hard refresh.
+| Setting | Value | Why |
+| --- | --- | --- |
+| **Root Directory** | `frontend` | The console is `frontend/`. A root directory left over from when the repository root *was* the Vite app points at `frontend/frontend/`, and the build fails. |
+| **Build Command** | `npm run build` | The default for the Vite preset. |
+| **Output Directory** | `dist` | The default for the Vite preset. |
+| **Env var** | `VITE_API_BASE_URL` = the API origin | Inlined at build time; see §2. |
+
+The repository's own `vercel.json` already declares `rootDirectory: frontend`,
+the SPA rewrite and the cache headers, so the project only has to point at
+the right directory.
+
+**Reading a failed deployment's logs** needs a Vercel token:
+
+```bash
+npx vercel inspect <deployment-id> --logs --token $VERCEL_TOKEN
+```
+
+The failure message on the pull request names the deployment id.
 
 ---
 
