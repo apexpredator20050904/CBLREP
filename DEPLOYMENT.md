@@ -10,29 +10,46 @@ This deploys **only the React/Vite admin console** (`frontend/`). The Laravel AP
 
 | | |
 | --- | --- |
-| **Console** | `https://cblrep-frontend.vercel.app` (Vercel project `cblrep-frontend`, deployed by the Git integration) |
-| **API it calls** | `https://contest-bunny-unsorted.ngrok-free.dev` — the reserved ngrok subdomain, for now |
+| **Console** | `https://cblrep-frontend.vercel.app` (Vercel project `cblrep-frontend`, team `team-jesus7`) |
+| **API it calls** | `https://cblrep-frontend.vercel.app/api/*` — **the same origin**, proxied by Vercel to the tunnel |
+| **The tunnel** | `https://contest-bunny-unsorted.ngrok-free.dev` → this machine's Laravel API on port 8000 |
 | **Why not `api.cblrep.ph`?** | That host is not serving: it accepts TCP on 80/443 but answers the TLS handshake with an `internal error` alert and returns an empty reply. The console points at the tunnel until the host is back. |
 
+### The API is same-origin, exactly as in production
+
+The console calls **its own origin** (`/api/*`), and `frontend/vercel.json`
+rewrites that to the tunnel. This is the same topology the production host
+uses: on the Debian server, nginx serves the console's static files and routes
+`/api/*` to PHP-FPM. Here, Vercel serves the static files and routes `/api/*`
+to the tunnel.
+
+Two consequences worth knowing:
+
+- **There is no CORS at all** — the browser talks to its own origin, so no
+  preflight and no `Access-Control-Allow-Origin`. The `*.vercel.app` pattern
+  in `backend/config/cors.php` is still there for the day the console is
+  pointed straight at the API.
+- **The `ngrok-skip-browser-warning` header** (`frontend/src/services/adminApi.js`)
+  is what makes the tunnel usable from a browser. ngrok's free tier answers a
+  browser GET with its "You are about to visit…" warning page instead of the
+  API's JSON, which broke the session check and every listing read. The header
+  tells ngrok to pass the request through; a normal API ignores it.
+
 **The console only works while this machine and the ngrok tunnel are running.**
-The tunnel is the API the deployment calls, so the laptop going to sleep takes
-the console down with it. That is the price of deploying before the production
-host is repaired.
+The laptop going to sleep takes the console's data down with it. That is the
+price of deploying before the production host is repaired.
 
-**To move it to the production API** (once `api.cblrep.ph` serves again):
+### Moving it to the production API
 
-1. change the repository variable `VERCEL_API_BASE_URL` to `https://api.cblrep.ph`;
-2. push anything to `main` (or run the *Deploy console* workflow by hand).
+When `api.cblrep.ph` serves again:
 
-The value is inlined into the bundle **at build time**, so a redeploy is what
-makes it take effect. The `api.cblrep.ph` origin is already in the API's
-`allowed_origins`, so no CORS change is needed for that move.
+1. drop the `/api/*` rewrite from `frontend/vercel.json`;
+2. set `VITE_API_BASE_URL` to `https://api.cblrep.ph` (a project environment
+   variable, or the `PRODUCTION_API_URL` variable the release workflow uses);
+3. redeploy — the value is inlined into the bundle **at build time**.
 
-**CORS, once and for all:** Vercel cannot run PHP-FPM, so a console served
-from there calls the API cross-origin and the API must answer the preflight.
-`backend/config/cors.php` carries a `*.vercel.app` pattern for exactly that —
-it covers the production alias and every random preview deployment URL. A
-foreign origin still gets no `Access-Control-Allow-Origin`.
+The `api.cblrep.ph` origin is already in the API's `allowed_origins`, so no
+CORS change is needed for that move.
 
 ---
 
@@ -40,9 +57,16 @@ foreign origin still gets no `Access-Control-Allow-Origin`.
 
 | File | Purpose |
 | --- | --- |
-| `vercel.json` (root) | Vercel project config: `rootDirectory: frontend`, `outputDirectory: dist`, SPA rewrites, cache headers |
+| `frontend/vercel.json` | The console's Vercel config: the SPA rewrite, the `/api/*` proxy to the tunnel, and the cache headers. **It lives in `frontend/`, not at the repository root** — Vercel reads the config from the *project's root directory*, and the project's root directory is `frontend`. |
 | `.vercelignore` (root) | Keeps `backend/`, `mobile/`, `storage/`, logs and `node_modules` out of the Vercel upload |
 | `frontend/.env.example` | Documents every environment variable for the Vercel dashboard |
+
+> The repository root used to carry a `vercel.json` with `"rootDirectory":
+> "frontend"`. **`rootDirectory` is not a `vercel.json` property** — it is a
+> project setting — so Vercel rejected the file outright
+> (`Invalid vercel.json - should NOT have additional property
+> 'rootDirectory'`) and every deployment failed before the build started. The
+> root file is gone and the config lives where Vercel actually reads it.
 
 **SPA routing:** `vercel.json` rewrites everything except `/api/*` to
 `/index.html`, so refreshing `/login`, `/admin/listings`, `/admin/settings`, etc.
