@@ -1,0 +1,92 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Deploy — the Laravel API to the Debian host
+# ─────────────────────────────────────────────────────────────────────────────
+# The console is deployed by Vercel through the Git integration, so this
+# workflow only delivers the API. The server already holds a git checkout of
+# the monorepo at /var/www/cblrep, so the deploy drives that checkout rather
+# than shipping files over the wire — the same sequence as
+# backend/deploy/DEPLOY_DEBIAN.md §12.
+#
+# The deploy user needs passwordless sudo for:
+#   systemctl reload php8.3-fpm
+#   systemctl reload nginx
+#   systemctl restart cblrep-queue
+#
+# Secrets: DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY
+# ─────────────────────────────────────────────────────────────────────────────
+name: Deploy API
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time, and never cancel a running one: a half-applied
+# release is worse than a slow queue.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to the production host
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DEPLOY_HOST" ] || [ -z "$DEPLOY_SSH_KEY" ]; then
+            echo "::error::The deploy secrets are not set on this repository."
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new "$DEPLOY_USER@$DEPLOY_HOST" bash -s <<'REMOTE'
+          set -euo pipefail
+          cd /var/www/cblrep
+
+          git fetch origin
+          git checkout main
+          git pull --ff-only
+
+          cd backend
+          composer install --no-dev --optimize-autoloader
+          php artisan migrate --force
+          php artisan config:cache
+          php artisan route:cache
+          php artisan view:cache
+
+          cd ../frontend
+          npm ci
+          npm run build
+
+          sudo systemctl reload php8.3-fpm
+          sudo systemctl reload nginx
+          # The queue worker is optional — it is only present when the host
+          # runs the worker as a service.
+          sudo systemctl restart cblrep-queue 2>/dev/null || \
+            echo "::notice::cblrep-queue is not enabled on this host."
+          REMOTE
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if curl -fsS --max-time 10 https://api.cblrep.ph/api/platform/status; then
+              echo
+              echo "::notice::The API is answering."
+              exit 0
+            fi
+            echo "attempt $attempt: the API did not answer yet, retrying…"
+            sleep 5
+          done
+          echo "::error::The API did not answer after the deploy."
+          exit 1

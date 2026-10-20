@@ -784,6 +784,28 @@ With `MAIL_MAILER=log`, password-reset codes are readable in
 
 ---
 
+## 7.8 Continuous integration and delivery
+
+Every push and pull request is tested by GitHub Actions, and a `v*` tag
+publishes a signed APK. The full runbook — the branches, the workflows, the
+secrets to add and how to cut a release — is in
+**[`docs/CI_CD.md`](docs/CI_CD.md)**.
+
+The short version:
+
+| What | Where | How |
+| --- | --- | --- |
+| The gate | `.github/workflows/ci.yml` | The same file runs on `main` (all three suites) and on each tier branch (its own suite). |
+| The API delivery | `.github/workflows/deploy.yml` | A push to `main` updates the Debian host and smoke-tests the API. |
+| The console | Vercel | The Git integration redeploys it on every push to `main`. |
+| The APK | `.github/workflows/release.yml` | `git tag v1.5.5 && git push origin v1.5.5` builds both signed variants, publishes them, and points the app's update channel at the new one. |
+
+The secrets the workflows need are listed in `docs/CI_CD.md`; until they are
+set, the deploy and release jobs report what is missing and stop, and the CI
+gate runs on its own.
+
+---
+
 ## 8. Quick Reference
 
 ```bash

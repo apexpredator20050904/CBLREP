@@ -1,0 +1,43 @@
+# Dependency updates for the monorepo.
+#
+# One entry per ecosystem, each pointed at the tier that owns it. The
+# monorepo layout (backend/, frontend/, mobile/) is what Dependabot sees on
+# the default branch; the tier branches carry their own manifests at the
+# root, and Dependabot follows the default branch only.
+version: 2
+updates:
+  - package-ecosystem: composer
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      laravel:
+        patterns:
+          - laravel/*
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: pub
+    directory: /mobile
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns:
+          - '*'
