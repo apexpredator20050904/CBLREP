@@ -56,7 +56,7 @@ jobs:
       frontend: ${{ steps.detect.outputs.frontend }}
       mobile: ${{ steps.detect.outputs.mobile }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: detect
         name: Find the tiers
         run: |
@@ -114,7 +114,7 @@ jobs:
       DB_USERNAME: cblrep
       DB_PASSWORD: cblrep
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
@@ -147,7 +147,7 @@ jobs:
           EOF
 
       - name: Cache the Composer packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ needs.detect.outputs.backend }}/vendor
           key: composer-${{ runner.os }}-${{ needs.detect.outputs.backend }}-${{ hashFiles('**/composer.lock') }}
@@ -195,10 +195,10 @@ jobs:
       run:
         working-directory: ${{ needs.detect.outputs.frontend }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '20'
           cache: npm
@@ -222,7 +222,7 @@ jobs:
       run:
         working-directory: ${{ needs.detect.outputs.mobile }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
