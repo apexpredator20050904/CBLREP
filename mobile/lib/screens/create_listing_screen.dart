@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart' hide Feedback;
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import '../config/community.dart';
+import '../config/listing_options.dart';
 import '../core/api_service.dart';
 import '../core/feedback.dart';
 import '../core/listing_draft_store.dart';
@@ -44,8 +46,12 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
   // The return side of a barter — what the member hopes to receive. Ignored
   // for free/paid listings, which have no return side.
   final wanted = TextEditingController();
-  // How much is needed. Only meaningful on a NEED ("5 kg of rice").
-  final quantity = TextEditingController();
+  // Structured NEED quantity: a number plus a unit key. The composed display
+  // string ("5 kg") is still sent as the legacy `quantity` field.
+  final quantityValue = TextEditingController();
+  String quantityUnit = 'piece';
+  // How soon a NEED has to be met. Ignored (and not sent) for an OFFER.
+  String urgency = 'flexible';
   String category = 'Tools';
   String type = 'offer', condition = 'Good', barangay = trinidadBarangays.first;
   // Flexible compensation: free | barter | paid.
@@ -99,6 +105,9 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
 
   /// True when the form is composing a NEED rather than an OFFER.
   bool get _isNeed => type == 'request';
+
+  /// Direction-specific labels and helper copy.
+  ListingFormCopy get _copy => ListingFormCopy.of(type);
 
   /// The condition options that apply to the current direction.
   List<String> get _conditions => _isNeed ? _needConditions : _offerConditions;
@@ -159,7 +168,14 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
 
     // Autosave on any change to the text fields (debounced in _scheduleDraftSave),
     // and flip the "has content" flag so the discard action appears.
-    for (final controller in [title, description, purok, price, wanted]) {
+    for (final controller in [
+      title,
+      description,
+      purok,
+      price,
+      wanted,
+      quantityValue,
+    ]) {
       controller.addListener(_onFieldChanged);
     }
   }
@@ -172,7 +188,7 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
     if (!_posted && !_discarded) {
       _persistDraft();
     }
-    title.dispose(); description.dispose(); purok.dispose(); price.dispose(); wanted.dispose(); super.dispose();
+    title.dispose(); description.dispose(); purok.dispose(); price.dispose(); wanted.dispose(); quantityValue.dispose(); super.dispose();
   }
 
   /// Reload a saved draft into the form. Only values the API would accept are
@@ -202,7 +218,27 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
       if (['free', 'barter', 'paid'].contains(comp)) compensation = comp;
       // A need cannot be free — an old draft may predate that rule.
       if (type == 'request' && compensation == 'free') compensation = 'barter';
-      quantity.text = asString(draft['quantity']);
+      final restoredQuantity = asString(draft['quantityValue']);
+      quantityValue.text = restoredQuantity;
+      final restoredUnit = asString(draft['quantityUnit']);
+      if (listingUnits.any((unit) => unit.key == restoredUnit)) {
+        quantityUnit = restoredUnit;
+      }
+      final restoredUrgency = asString(draft['urgency']);
+      if (listingUrgencies.any((option) => option.key == restoredUrgency)) {
+        urgency = restoredUrgency;
+      }
+      // Drafts written before the structured field stored only free text
+      // ("5 kg"). Parse the common shape so the member does not lose it.
+      if (restoredQuantity.isEmpty) {
+        final legacy = asString(draft['quantity']);
+        final match = RegExp(r'^\s*(\d+(?:[.,]\d+)?)\s*(.*)$').firstMatch(legacy);
+        if (match != null) {
+          quantityValue.text = match.group(1)!.replaceAll(',', '.');
+          final unit = _unitKeyForLabel(match.group(2)!);
+          if (unit != null) quantityUnit = unit;
+        }
+      }
       priceNegotiable = draft['priceNegotiable'] == true;
       final lat = draft['latitude'];
       final lng = draft['longitude'];
@@ -223,6 +259,20 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
           images.isNotEmpty;
       _hasContent = _draftRestored;
     });
+  }
+
+  /// Map a legacy unit label ("kg", "sacks", "hours") back to its key.
+  String? _unitKeyForLabel(String label) {
+    final normalized = label.trim().toLowerCase();
+    if (normalized.isEmpty) return null;
+    for (final unit in listingUnits) {
+      if (normalized == unit.key ||
+          normalized == unit.singular.toLowerCase() ||
+          normalized == unit.plural.toLowerCase()) {
+        return unit.key;
+      }
+    }
+    return null;
   }
 
   /// Debounced autosave, so a burst of keystrokes writes once.
@@ -247,6 +297,9 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
         purok.text.trim().isNotEmpty ||
         price.text.trim().isNotEmpty ||
         wanted.text.trim().isNotEmpty ||
+        quantityValue.text.trim().isNotEmpty ||
+        quantityUnit != 'piece' ||
+        urgency != 'flexible' ||
         images.isNotEmpty ||
         pinLocation != null;
     if (hasContent != _hasContent && mounted) {
@@ -268,7 +321,9 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
         blank(purok.text) &&
         blank(price.text) &&
         blank(wanted.text) &&
-        blank(quantity.text) &&
+        blank(quantityValue.text) &&
+        quantityUnit == 'piece' &&
+        urgency == 'flexible' &&
         images.isEmpty &&
         pinLocation == null;
     if (empty) {
@@ -280,7 +335,17 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
       'description': description.text,
       'wanted': wanted.text,
       'price': price.text,
-      'quantity': quantity.text,
+      'quantityValue': quantityValue.text,
+      'quantityUnit': quantityUnit,
+      'urgency': urgency,
+      // Keep the old key too, so a downgrade / older build can still restore
+      // the draft. New restores read the structured keys first.
+      'quantity': _isNeed && double.tryParse(quantityValue.text.trim()) != null
+          ? formatListingQuantity(
+              double.tryParse(quantityValue.text.trim())!,
+              quantityUnit,
+            )
+          : '',
       'purok': purok.text,
       'barangay': barangay,
       'category': category,
@@ -305,7 +370,9 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
       description.clear();
       wanted.clear();
       price.clear();
-      quantity.clear();
+      quantityValue.clear();
+      quantityUnit = 'piece';
+      urgency = 'flexible';
       images.clear();
       pinLocation = null;
       priceNegotiable = false;
@@ -393,8 +460,10 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
             // A need's price is a budget ceiling, so it is never negotiable.
             priceNegotiable: compensation == 'paid' && !_isNeed && priceNegotiable,
             wantedItem: compensation == 'barter' ? wanted.text.trim() : null,
-            // NEED-only: how much is needed.
-            quantity: _isNeed ? quantity.text.trim() : null,
+            // NEED-only: the numeric amount, its unit key, and urgency.
+            quantityValue: _isNeed ? double.tryParse(quantityValue.text.trim()) : null,
+            quantityUnit: _isNeed ? quantityUnit : null,
+            urgency: _isNeed ? urgency : null,
             // The exact pin, when the poster dropped one. Null keeps the
             // backend's barangay-anchor fallback so the listing still appears
             // on the community map.
@@ -424,9 +493,167 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
     }
   }
 
+  /// Validate the numeric half of a NEED quantity. The unit always has a
+  /// value (the chips default to "pc"), so only the number can be missing.
+  String? _validateQuantity(String? raw) {
+    if (!_isNeed) return null;
+    final text = (raw ?? '').trim();
+    if (text.isEmpty) return 'Enter how much you need';
+    final parsed = double.tryParse(text.replaceAll(',', '.'));
+    if (parsed == null || parsed <= 0) {
+      return 'Enter a number greater than zero';
+    }
+    return null;
+  }
+
+  Widget _quantitySection(ListingFormCopy copy) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final muted = dark ? Colors.white60 : Colors.black54;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextFormField(
+          controller: quantityValue,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [_QuantityInputFormatter()],
+          decoration: InputDecoration(
+            labelText: copy.quantityLabel,
+            helperText: copy.quantityHelper,
+            helperMaxLines: 2,
+          ),
+          validator: _validateQuantity,
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'Unit',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: muted,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            for (final unit in listingUnits)
+              ChoiceChip(
+                label: Text(unit.plural),
+                selected: quantityUnit == unit.key,
+                onSelected: (_) => _touch(() => quantityUnit = unit.key),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _urgencySection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'How soon do you need it?',
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            for (final option in listingUrgencies)
+              ChoiceChip(
+                avatar: Icon(option.icon, size: 16),
+                showCheckmark: false,
+                label: Text(option.label),
+                selected: urgency == option.key,
+                onSelected: (_) => _touch(() => urgency = option.key),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _barterSection(ListingFormCopy copy) {
+    return TextFormField(
+      controller: wanted,
+      maxLength: 160,
+      textCapitalization: TextCapitalization.sentences,
+      decoration: InputDecoration(
+        labelText: copy.wantedLabel,
+        helperText: copy.wantedHelper,
+        helperMaxLines: 2,
+      ),
+    );
+  }
+
+  Widget _paidSection(ListingFormCopy copy) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        TextFormField(
+          controller: price,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(
+            labelText: copy.priceLabel,
+            prefixText: '₱ ',
+            helperText: copy.priceHelper,
+            helperMaxLines: 2,
+          ),
+          validator: (v) {
+            if (compensation != 'paid') return null;
+            final parsed = double.tryParse((v ?? '').trim());
+            if (parsed == null) return 'Enter a price';
+            if (parsed <= 0) return 'Price must be greater than zero';
+            return null;
+          },
+        ),
+        // "Negotiable" belongs to a seller who may take less than the asking
+        // price. A budget ceiling is the poster's own limit, so it is not
+        // negotiable against itself.
+        if (!_isNeed)
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: priceNegotiable,
+            onChanged: (value) => _touch(() => priceNegotiable = value),
+            title: const Text('Price is negotiable', style: TextStyle(fontSize: 13)),
+            subtitle: const Text(
+              'Let buyers send a counter-offer in chat.',
+              style: TextStyle(fontSize: 11),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _freeSection() {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: dark ? CblrepColors.fieldGreen : const Color(0xFFEFE9DA),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: dark ? Colors.white12 : Colors.black12),
+      ),
+      child: Row(children: [
+        const Icon(Icons.card_giftcard, size: 18, color: CblrepColors.compFree),
+        const SizedBox(width: 10),
+        const Expanded(
+          child: Text(
+            'No price needed — just add pickup notes so neighbours know where to collect.',
+            style: TextStyle(fontSize: 11, height: 1.35),
+          ),
+        ),
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
+    final copy = _copy;
     final auth = context.watch<AuthProvider>();
     final listings = context.watch<ListingsProvider>();
     final postLimit = listings.activePostLimit;
@@ -466,16 +693,39 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
           const SizedBox(height: 8),
           // Say which direction the form is in, so the labels below are never
           // ambiguous — the two directions read the same fields differently.
-          Text(
-            _isNeed
-                ? 'Posting a NEED — you are looking for this.'
-                : 'Posting an OFFER — you have this to share.',
-            style: TextStyle(fontSize: 11, color: dark ? Colors.white70 : Colors.black54),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 180),
+            child: Text(
+              copy.directionBanner,
+              key: ValueKey(type),
+              style: TextStyle(fontSize: 11, color: dark ? Colors.white70 : Colors.black54),
+            ),
           ),
           const SizedBox(height: 12),
-          TextFormField(controller: title, decoration: InputDecoration(labelText: 'Title', helperText: _isNeed ? 'Name the thing you want, not "looking for".' : null), validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null),
+          TextFormField(
+            controller: title,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: InputDecoration(
+              labelText: copy.titleLabel,
+              hintText: copy.titleHint,
+              helperText: copy.titleHelper,
+              helperMaxLines: 2,
+            ),
+            validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null,
+          ),
           const SizedBox(height: 12),
-          TextFormField(controller: description, maxLines: 4, decoration: InputDecoration(labelText: _isNeed ? 'Why do you need it, and by when?' : 'Description (what, why, pickup notes)')),
+          TextFormField(
+            controller: description,
+            maxLines: 4,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: InputDecoration(
+              labelText: copy.descriptionLabel,
+              hintText: copy.descriptionHint,
+              helperText: copy.descriptionHelper,
+              helperMaxLines: 2,
+              alignLabelWithHint: true,
+            ),
+          ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             initialValue: category,
@@ -513,79 +763,42 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
             onSelectionChanged: (value) => _touch(() => compensation = value.first),
           ),
           const SizedBox(height: 8),
-          _CompensationNotice(
-            type: compensation,
-            copy: (_isNeed ? _needCompensationCopy : _compensationCopy)[compensation]!,
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 180),
+            child: _CompensationNotice(
+              key: ValueKey('$type-$compensation'),
+              type: compensation,
+              copy: (_isNeed ? _needCompensationCopy : _compensationCopy)[compensation]!,
+            ),
           ),
-          // NEED-only: how much is needed. A want ad that says "rice" but not
-          // "5 kg" leaves the neighbour guessing — and bulk needs are the
-          // normal case in a barangay.
-          if (_isNeed) ...[
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: quantity,
-              maxLength: 60,
-              decoration: const InputDecoration(
-                labelText: 'How much do you need? (optional)',
-                helperText: 'e.g. 5 kg, 2 sacks, one bundle',
-              ),
-            ),
-          ],
-          // Barter only: the return side. On an offer it is what the owner
-          // hopes to receive; on a need it is what the poster can trade —
-          // naming it up front is what lets a neighbour offer the right
-          // thing instead of guessing.
-          if (compensation == 'barter') ...[
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: wanted,
-              maxLength: 160,
-              decoration: InputDecoration(
-                labelText: _isNeed
-                    ? 'In return, I can offer (optional)'
-                    : 'In return, I would like (optional)',
-                helperText: _isNeed
-                    ? 'e.g. 2 hours of childcare, or a bag of rice'
-                    : 'e.g. 5 kg of rice, or an hour of plumbing help',
-              ),
-            ),
-          ],
-          if (compensation == 'paid') ...[
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: price,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: InputDecoration(
-                labelText: _isNeed ? 'I can pay up to (₱)' : 'Price (₱)',
-                prefixText: '₱ ',
-                helperText: _isNeed
-                    ? 'Your budget ceiling — what you are willing to pay for this.'
-                    : null,
-              ),
-              validator: (v) {
-                if (compensation != 'paid') return null;
-                final parsed = double.tryParse((v ?? '').trim());
-                if (parsed == null) return 'Enter a price';
-                if (parsed <= 0) return 'Price must be greater than zero';
-                return null;
-              },
-            ),
-            // "Negotiable" belongs to a seller who may take less than the
-            // asking price. A budget ceiling is the poster's own limit, so it
-            // is not negotiable against itself.
-            if (!_isNeed)
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                value: priceNegotiable,
-                onChanged: (value) => _touch(() => priceNegotiable = value),
-                title: const Text('Price is negotiable', style: TextStyle(fontSize: 13)),
-                subtitle: const Text('Let buyers send a counter-offer in chat.', style: TextStyle(fontSize: 11)),
-              ),
-          ],
+          // NEED-only: the structured amount, unit and urgency. Both sections
+          // animate in/out when the direction flips.
+          _AnimatedSection(
+            visible: _isNeed,
+            child: _quantitySection(copy),
+          ),
+          _AnimatedSection(
+            visible: _isNeed,
+            child: _urgencySection(),
+          ),
+          // Barter/paid/free terms slide in as the member changes mode. The
+          // controllers stay alive, so toggling back restores what was typed.
+          _AnimatedSection(
+            visible: compensation == 'barter',
+            child: _barterSection(copy),
+          ),
+          _AnimatedSection(
+            visible: compensation == 'paid',
+            child: _paidSection(copy),
+          ),
+          _AnimatedSection(
+            visible: compensation == 'free',
+            child: _freeSection(),
+          ),
           const SizedBox(height: 12),
           DropdownButtonFormField(
             initialValue: _conditions.contains(condition) ? condition : _conditions.first,
-            decoration: InputDecoration(labelText: _isNeed ? 'Condition I can accept' : 'Condition'),
+            decoration: InputDecoration(labelText: copy.conditionLabel),
             items: _conditions.map((value) => DropdownMenuItem(value: value, child: Text(value))).toList(),
             onChanged: (value) => _touch(() => condition = value!),
           ),
@@ -637,12 +850,68 @@ class _CreateListingScreenState extends State<CreateListingScreen> {
   }
 }
 
+/// Slide/fade wrapper for the conditional sections of the form.
+///
+/// AnimatedSwitcher removes the hidden child after the transition, so a price
+/// validator cannot keep blocking submit after the member switches to barter.
+/// The controllers live in the parent State, so values survive a round trip.
+class _AnimatedSection extends StatelessWidget {
+  final bool visible;
+  final Widget child;
+
+  const _AnimatedSection({required this.visible, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRect(
+      child: AnimatedSize(
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeInOutCubic,
+        alignment: Alignment.topCenter,
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 220),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, animation) => SizeTransition(
+            sizeFactor: animation,
+            alignment: Alignment.topCenter,
+            child: FadeTransition(opacity: animation, child: child),
+          ),
+          child: visible
+              ? Padding(
+                  key: const ValueKey('visible'),
+                  padding: const EdgeInsets.only(top: 12),
+                  child: child,
+                )
+              : const SizedBox(key: ValueKey('hidden'), width: double.infinity),
+        ),
+      ),
+    );
+  }
+}
+
+/// Reject anything that is not a positive decimal with at most two places.
+class _QuantityInputFormatter extends TextInputFormatter {
+  static final _pattern = RegExp(r'^\d{0,6}(\.\d{0,2})?$');
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.text.isEmpty || _pattern.hasMatch(newValue.text)) {
+      return newValue;
+    }
+    return oldValue;
+  }
+}
+
 /// Read-only banner describing the selected sharing mode. Colour-coded so the
 /// three compensation types read as clearly on the form as they do on a card.
 class _CompensationNotice extends StatelessWidget {
   final String type;
   final String copy;
-  const _CompensationNotice({required this.type, required this.copy});
+  const _CompensationNotice({super.key, required this.type, required this.copy});
 
   @override
   Widget build(BuildContext context) {

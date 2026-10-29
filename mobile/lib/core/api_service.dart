@@ -611,7 +611,11 @@ class ApiService {
     double? price,
     bool priceNegotiable = false,
     String? wantedItem,
+    // NEED-only: the legacy display string plus the structured pair/urgency.
     String? quantity,
+    double? quantityValue,
+    String? quantityUnit,
+    String? urgency,
     double? latitude,
     double? longitude,
     List<File> images = const [],
@@ -643,9 +647,16 @@ class ApiService {
       // "what I can offer in return" on a need).
       if (compensationType == 'barter' && wantedItem != null && wantedItem.trim().isNotEmpty)
         'wanted_item': wantedItem.trim(),
-      // NEED-only: how much is needed ("5 kg of rice").
+      // NEED-only: the legacy display string ("5 kg of rice") plus the
+      // structured pair the API validates and stores.
       if (type == 'request' && quantity != null && quantity.trim().isNotEmpty)
         'quantity': quantity.trim(),
+      if (type == 'request' && quantityValue != null)
+        'quantity_value': quantityValue,
+      if (type == 'request' && quantityUnit != null && quantityUnit.isNotEmpty)
+        'quantity_unit': quantityUnit,
+      if (type == 'request' && urgency != null && urgency.isNotEmpty)
+        'urgency': urgency,
     };
     // Build the multipart body by hand so the photo gallery is sent as repeated
     // `images[]` fields, which Laravel parses into the `images` array. The first

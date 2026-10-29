@@ -117,7 +117,7 @@ void main() {
       expect(find.text('Free'), findsOneWidget);
       expect(find.text('In return, I would like (optional)'), findsOneWidget);
       expect(find.text('I can pay up to (₱)'), findsNothing);
-      expect(find.text('How much do you need? (optional)'), findsNothing);
+      expect(find.text('How much do you need?'), findsNothing);
     });
 
     testWidgets('a need hides Free and moves the form into the legal cell',
@@ -146,11 +146,18 @@ void main() {
 
       await switchToNeed(tester);
 
-      expect(find.text('How much do you need? (optional)'), findsOneWidget);
+      expect(find.text('How much do you need?'), findsOneWidget);
       expect(find.text('In return, I can offer (optional)'), findsOneWidget);
       expect(find.text('In return, I would like (optional)'), findsNothing);
       expect(find.text('Posting a NEED — you are looking for this.'),
           findsOneWidget);
+      // The quick-select unit picker and urgency chips are NEED-only.
+      expect(find.text('Unit'), findsOneWidget);
+      expect(find.text('kg'), findsOneWidget);
+      expect(find.text('How soon do you need it?'), findsOneWidget);
+      expect(find.text('Urgent / Today'), findsOneWidget);
+      expect(find.text('This Week'), findsOneWidget);
+      expect(find.text('Flexible'), findsOneWidget);
     });
 
     testWidgets('a paid need asks for a budget, not a price', (tester) async {

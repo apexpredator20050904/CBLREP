@@ -7,6 +7,11 @@ double? _asDouble(dynamic v) {
   return null;
 }
 
+/// Trim trailing zeros so 5.00 reads as "5" and 2.50 as "2.5".
+String _quantityNumber(double value) {
+  return value.toStringAsFixed(2).replaceFirst(RegExp(r'\.?0+$'), '');
+}
+
 /// Canonical listing status. The API already normalises the legacy "closed"
 /// word to "archived"; this mirrors that so an older payload cannot introduce
 /// a status the client does not understand.
@@ -157,7 +162,21 @@ class ListingModel {
   final String imagesRole;
 
   /// How much is needed — "5 kg of rice". Only meaningful on a NEED.
+  ///
+  /// The legacy display string. New payloads also carry the structured pair
+  /// below; [quantityDisplay] prefers whichever is present.
   final String? quantity;
+  final double? quantityValue;
+  final String? quantityUnit;
+  final String? quantityUnitLabel;
+
+  /// Which reading applies to the quantity: "needed" on a NEED, null on an
+  /// OFFER (offers have no amount).
+  final String quantityRole;
+
+  /// How soon a NEED has to be met: urgent | this_week | flexible.
+  final String? urgency;
+  final String? urgencyLabel;
 
   /// Paid-only: the owner welcomes a counter-offer, so the app shows
   /// "Negotiable" and a "Make an offer" action. Always false for free/barter
@@ -205,6 +224,12 @@ class ListingModel {
     this.conditionRole = 'item_state',
     this.imagesRole = 'item_photos',
     this.quantity,
+    this.quantityValue,
+    this.quantityUnit,
+    this.quantityUnitLabel,
+    this.quantityRole = 'needed',
+    this.urgency,
+    this.urgencyLabel,
     this.priceNegotiable = false,
     required this.category,
     required this.condition,
@@ -276,6 +301,19 @@ class ListingModel {
   /// listings have no return side, so a stale payload cannot surface one.
   bool get hasWantedItem => isBarter && (wantedItem?.isNotEmpty ?? false);
 
+  /// The amount to show, preferring the composed legacy string and falling
+  /// back to formatting the structured pair from a newer/older payload.
+  String? get quantityDisplay {
+    final legacy = quantity?.trim();
+    if (legacy != null && legacy.isNotEmpty) return legacy;
+    if (quantityValue != null && (quantityUnitLabel?.isNotEmpty ?? false)) {
+      return '${_quantityNumber(quantityValue!)} $quantityUnitLabel';
+    }
+    return null;
+  }
+
+  bool get hasUrgency => isNeed && urgency != null && urgency!.isNotEmpty;
+
   factory ListingModel.fromJson(Map<String, dynamic> json) {
     final owner = json['owner'];
     final compensation = '${json['compensation_type'] ?? 'barter'}';
@@ -299,6 +337,12 @@ class ListingModel {
           (json['condition_role'] as String?) ?? 'item_state',
       imagesRole: (json['images_role'] as String?) ?? 'item_photos',
       quantity: (json['quantity'] as String?)?.trim(),
+      quantityValue: _asDouble(json['quantity_value']),
+      quantityUnit: (json['quantity_unit'] as String?)?.trim(),
+      quantityUnitLabel: (json['quantity_unit_label'] as String?)?.trim(),
+      quantityRole: (json['quantity_role'] as String?) ?? 'needed',
+      urgency: (json['urgency'] as String?)?.trim(),
+      urgencyLabel: (json['urgency_label'] as String?)?.trim(),
       // Only a paid listing can be negotiable; the server already normalises
       // this, but guard the flag here so a stale/foreign payload cannot make a
       // gift or a trade look open to offers.

@@ -83,12 +83,47 @@ void main() {
         findsOneWidget);
   });
 
+  testWidgets('a structured need draft restores its unit and urgency',
+      (tester) async {
+    await ListingDraftStore.save(42, {
+      'title': 'Rice',
+      'type': 'request',
+      'compensation': 'barter',
+      'quantityValue': '2.5',
+      'quantityUnit': 'sack',
+      'urgency': 'urgent',
+      'barangay': 'Bongbong',
+      'purok': 'Purok 3',
+      'category': 'Food',
+    });
+
+    useTallSurface(tester);
+    await tester.pumpWidget(host());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Rice'), findsOneWidget);
+    expect(find.text('2.5'), findsOneWidget);
+    expect(
+      tester.widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'sacks')).selected,
+      isTrue,
+    );
+    expect(
+      tester
+          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Urgent / Today'))
+          .selected,
+      isTrue,
+    );
+  });
+
   testWidgets('typing autosaves the draft', (tester) async {
     useTallSurface(tester);
     await tester.pumpWidget(host());
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.widgetWithText(TextFormField, 'Title'), 'Fresh mangoes');
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'What are you offering?'),
+      'Fresh mangoes',
+    );
     // Let the 700ms debounce elapse, then let the async write settle.
     await tester.pump(const Duration(milliseconds: 800));
     await tester.pumpAndSettle();
