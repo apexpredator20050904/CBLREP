@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import '../config/listing_options.dart';
 import '../core/api_service.dart';
 import '../core/input_sanitizer.dart';
 import '../models/models.dart';
@@ -177,7 +178,9 @@ class ListingsProvider extends ChangeNotifier {
     double? price,
     bool priceNegotiable = false,
     String? wantedItem,
-    String? quantity,
+    double? quantityValue,
+    String? quantityUnit,
+    String? urgency,
     double? latitude,
     double? longitude,
     List<File> images = const [],
@@ -205,10 +208,16 @@ class ListingsProvider extends ChangeNotifier {
       wantedItem: compensationType == 'barter' && (wantedItem?.isNotEmpty ?? false)
           ? InputSanitizer.text(wantedItem!, max: 160)
           : null,
-      // NEED-only: how much is needed ("5 kg of rice").
-      quantity: type == 'request' && (quantity?.isNotEmpty ?? false)
-          ? InputSanitizer.text(quantity!, max: 60)
+      // NEED-only: the structured amount plus the composed legacy string
+      // ("5 kg") that older clients and the admin console still read.
+      quantity: type == 'request' &&
+              quantityValue != null &&
+              (quantityUnit?.isNotEmpty ?? false)
+          ? formatListingQuantity(quantityValue, quantityUnit!)
           : null,
+      quantityValue: type == 'request' ? quantityValue : null,
+      quantityUnit: type == 'request' ? quantityUnit : null,
+      urgency: type == 'request' ? urgency : null,
       // Ordered photo gallery; the first becomes the cover.
       images: images,
     );

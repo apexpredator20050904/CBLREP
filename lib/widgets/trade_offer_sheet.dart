@@ -156,7 +156,7 @@ class TradeOfferSheetState extends State<TradeOfferSheet> {
     // and ask for the poster's side in return, so the whole sheet is worded
     // from that side of the table.
     final isNeed = widget.listing.isNeed;
-    final quantity = (widget.listing.quantity ?? '').trim();
+    final quantity = (widget.listing.quantityDisplay ?? '').trim();
 
     return Padding(
       // Lift the sheet above the keyboard so the purok field stays visible.

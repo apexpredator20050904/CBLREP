@@ -238,6 +238,13 @@ class ListingCard extends StatelessWidget {
                       color: strong,
                     ),
                   ),
+                  if (listing.hasUrgency) ...[
+                    const SizedBox(height: 6),
+                    _UrgencyTag(
+                      urgency: listing.urgency!,
+                      label: listing.urgencyLabel ?? listing.urgency!,
+                    ),
+                  ],
                   const SizedBox(height: 6),
                   // Hyper-local tag. The chip sizes to the card width and its
                   // text ellipsizes, so "Barangay Poblacion · Purok 3"
@@ -417,6 +424,48 @@ class _ConditionTag extends StatelessWidget {
               color: Colors.white,
               fontSize: 10,
               fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A compact "how soon" pill for a NEED card.
+class _UrgencyTag extends StatelessWidget {
+  final String urgency;
+  final String label;
+
+  const _UrgencyTag({required this.urgency, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final (color, icon) = switch (urgency) {
+      'urgent' => (CblrepColors.dangerRed, Icons.bolt),
+      'this_week' => (CblrepColors.actionOrange, Icons.event_outlined),
+      _ => (CblrepColors.compFree, Icons.eco_outlined),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: color,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],

@@ -184,10 +184,12 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
   /// demander, on a NEED the reader is the supplier.
   String _suggestedOpener(ListingModel listing) {
     if (listing.isNeed) {
+      final quantity = listing.quantityDisplay;
+      final amount = quantity != null && quantity.isNotEmpty ? ' ($quantity)' : '';
       return switch (listing.compensationType) {
-        'paid' => 'Hi! I have "${listing.title}"${listing.quantity != null && listing.quantity!.isNotEmpty ? ' (${listing.quantity})' : ''}. '
+        'paid' => 'Hi! I have "${listing.title}"$amount. '
             'Can I supply it to you?',
-        _ => 'Hi! I have "${listing.title}"${listing.quantity != null && listing.quantity!.isNotEmpty ? ' (${listing.quantity})' : ''}. '
+        _ => 'Hi! I have "${listing.title}"$amount. '
             'Is that what you are looking for?',
       };
     }
@@ -241,6 +243,9 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
     if (!await _ensureSignedIn('offer to supply this request')) return;
     if (!mounted) return;
     final budget = widget.listing.price;
+    final quantity = widget.listing.quantityDisplay;
+    final quantitySuffix =
+        quantity != null && quantity.isNotEmpty ? ' ($quantity)' : '';
     final amount = await showDialog<double>(
       context: context,
       builder: (_) => _OfferDialog(listedPrice: budget, isSupplyQuote: true),
@@ -250,8 +255,7 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
         ? amount.toStringAsFixed(0)
         : amount.toStringAsFixed(2);
     await _contactOwner(
-      opener: 'Hi! I have "${widget.listing.title}"'
-          '${widget.listing.quantity != null && widget.listing.quantity!.isNotEmpty ? ' (${widget.listing.quantity})' : ''}. '
+      opener: 'Hi! I have "${widget.listing.title}"$quantitySuffix. '
           'I can supply it for ₱$formatted. Would that work for you?',
     );
   }
@@ -446,6 +450,15 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
                   color: need ? CblrepColors.brandGreen : CblrepColors.actionOrange,
                 ),
                 _CompBadge(listing: listing),
+                if (listing.hasUrgency)
+                  _ModeTag(
+                    label: (listing.urgencyLabel ?? listing.urgency!).toUpperCase(),
+                    color: switch (listing.urgency) {
+                      'urgent' => CblrepColors.dangerRed,
+                      'this_week' => CblrepColors.actionOrange,
+                      _ => CblrepColors.compFree,
+                    },
+                  ),
               ],
             ),
             const SizedBox(height: 10),
@@ -493,9 +506,9 @@ class _ListingDetailScreenState extends State<ListingDetailScreen> {
             const SizedBox(height: 8),
             Text(listing.description.isEmpty ? 'No description provided.' : listing.description, style: TextStyle(fontSize: 13, color: dark ? Colors.white : Colors.black87)),
             // How much is needed — a NEED-only line ("I need 5 kg of rice").
-            if (listing.isNeed && (listing.quantity ?? '').isNotEmpty) ...[
+            if (listing.isNeed && (listing.quantityDisplay ?? '').isNotEmpty) ...[
               const SizedBox(height: 10),
-              _row(Icons.scale_outlined, listing.quantity!, label: 'How much is needed'),
+              _row(Icons.scale_outlined, listing.quantityDisplay!, label: 'How much is needed'),
             ],
             // The return side of a barter, spelled out so a member knows what
             // the owner will actually trade for before they offer anything.
