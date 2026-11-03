@@ -40,21 +40,16 @@ export const TRINIDAD_BARANGAYS = [
 // over the LAN at http://<PC-IP>:5173.
 //
 // Set VITE_API_BASE_URL in frontend/.env (e.g. https://api.your-domain.com) to
-// call the Laravel API directly instead. Required for a production build
-// served from a static host such as Vercel; Laravel CORS must allow that
+// call the Laravel API directly instead; Laravel CORS must then allow that
 // origin (backend/config/cors.php). The value is inlined at build time, so
 // setting it on Vercel requires a new deployment to take effect.
+//
+// Leaving it empty in production is valid too: the deployed console calls its
+// own origin and Vercel's `/api/*` rewrite (vercel.json) proxies to the API —
+// exactly the same-origin topology the nginx production host uses. There is
+// deliberately no "not set" warning here: empty is the intended Vercel value,
+// and warning on it told operators to break a working deployment.
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
-
-// In a production build an unset base URL means every request goes to the
-// Vercel origin and the admin console silently 404s. Surface it once at boot
-// instead of leaving the operator to debug an empty table.
-if (import.meta.env.PROD && !API_BASE_URL) {
-  console.warn(
-    "[CBLREP] VITE_API_BASE_URL is not set — API requests will use same-origin /api/*. " +
-      "Set it in the Vercel project environment variables to the Laravel API origin.",
-  );
-}
 
 export const isAdminUser = (user) => {
   if (!user) return false;
