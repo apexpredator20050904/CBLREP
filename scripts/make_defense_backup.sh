@@ -7,8 +7,10 @@
 #   cblrep-db-<date>.sql                     MySQL schema + seeded data
 #   app-release.apk                          the signed, tunnel-pointed APK
 #   cblrep-defense-<date>.tar.gz             SHAREABLE bundle — all three tiers
-#                                            (with .git history), the DB dump,
-#                                            the APK, and the project docs
+#                                            (with .git history), the CURRENT
+#                                            DB dump, the CURRENT APK, and the
+#                                            project docs. Never the private
+#                                            2FA material or older artifacts.
 #   cblrep-defense-<date>-SECRETS.tar.gz     PRIVATE — backend/.env + the Android
 #                                            signing key. Never upload this to a
 #                                            shared drive.
@@ -58,6 +60,8 @@ tar -czf "$PKG" \
   --exclude="storage/backups/${PKG##*/}" \
   --exclude='storage/backups/*.tar.gz' \
   --exclude='storage/backups/*.git' \
+  --exclude='storage/backups/admin-2fa' \
+  --exclude='storage/backups/*-PRIVATE.txt' \
   --exclude='backend/vendor' \
   --exclude='backend/node_modules' \
   --exclude='backend/.env' \
@@ -83,14 +87,15 @@ tar -czf "$PKG" \
   --exclude='backend/.env' \
   --exclude='backend/.env.*' \
   -C "$ROOT" \
-  backend frontend mobile storage \
+  backend frontend mobile \
+  "storage/backups/app-release.apk" "storage/backups/$DUMP_NAME" \
   README.md RUNNING.md DEPLOYMENT.md docs \
-  vercel.json .vercelignore scripts
+  .vercelignore scripts
 
 echo "==> 4/4  Packing secrets + writing checksums"
 
-# Guard: the shareable bundle must never contain credentials.
-if tar -tzf "$PKG" | grep -qE '(^|/)(\.env|key\.properties)$|\.(jks|keystore)$'; then
+# Guard: the shareable bundle must never contain credentials or 2FA material.
+if tar -tzf "$PKG" | grep -qE '(^|/)(\.env|key\.properties)$|\.(jks|keystore)$|(^|/)admin-2fa|PRIVATE\.txt$'; then
   echo "ERROR: secrets detected inside $PKG — refusing to continue." >&2
   exit 1
 fi
