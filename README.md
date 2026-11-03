@@ -65,11 +65,12 @@ and members on top, and never deletes anything.
 
 ### 2. The tunnel
 
-The phone app and the deployed console both reach this machine through it:
+The phone app and the deployed console both reach this machine through it.
+The helper reads the host from `backend/.env`'s `APP_URL` and pins ngrok to it,
+because `frontend/vercel.json` hardcodes the same host in its `/api` rewrite:
 
 ```bash
-cd backend
-ngrok http 8000
+./scripts/dev-tunnel.sh      # from the repository root
 ```
 
 ### 3. The admin console
@@ -140,6 +141,17 @@ included — and `BarterCollapseTest` pins it down in CI on every push.
 - **The APK** — `git tag v1.5.5 && git push origin v1.5.5` builds both
   signed variants, publishes them to the GitHub Release, and points the
   app's update channel at the new one.
+
+  The two assets are **not interchangeable**:
+
+  | Asset | Points at | Use it when |
+  | --- | --- | --- |
+  | `app-release-ngrok.apk` | the reserved ngrok tunnel | **the defense / any demo** — install this one on the phones |
+  | `app-release.apk` | `https://api.cblrep.ph` | only after the production host is deployed and answering |
+
+  Until `api.cblrep.ph` is deployed (see `DEPLOYMENT.md`), hand out
+  **`app-release-ngrok.apk`**. The console and the app both depend on the
+  same tunnel, so start `./scripts/dev-tunnel.sh` first.
 - **The console** — the Vercel Git integration redeploys it on every push to
   `main`.
 

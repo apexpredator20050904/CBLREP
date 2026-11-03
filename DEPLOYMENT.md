@@ -39,6 +39,10 @@ Two consequences worth knowing:
 The laptop going to sleep takes the console's data down with it. That is the
 price of deploying before the production host is repaired.
 
+Run `./scripts/check-connections.sh` from the repository root to verify the
+whole chain — MariaDB, the local API, the tunnel, `APP_URL` vs the rewrite
+host, and the console's own `/api` — before blaming the console.
+
 ### Moving it to the production API
 
 When `api.cblrep.ph` serves again:
@@ -90,27 +94,41 @@ applying rewrites, so hashed assets under `/assets/` still resolve normally.
 
 ---
 
-## 2. Environment variable (required)
+## 2. Environment variable (pick the wiring first)
 
-Set this in **Vercel → Project → Settings → Environment Variables**:
+There are two supported wirings. **Do not mix them.**
 
-| Name | Example value | Scope |
+| | **A · Same-origin rewrite (current)** | **B · Direct to the API** |
 | --- | --- | --- |
-| `VITE_API_BASE_URL` | `https://api.cblrep.ph` | Production (and Preview if you want previews talking to the same API) |
+| `frontend/vercel.json` | keeps the `/api/:path*` rewrite | rewrite removed |
+| `VITE_API_BASE_URL` | **empty** | the API origin, e.g. `https://api.cblrep.ph` |
+| Browser calls | the console's own origin, proxied by Vercel | the API origin directly |
+| CORS | not involved | `backend/config/cors.php` must allow the console origin |
+| Use when | the API is behind the ngrok tunnel | `api.cblrep.ph` (or another host) serves the API |
 
-- No trailing slash and **no** `/api` suffix — `src/services/adminApi.js` appends
-  `/api` itself.
+Set the variable in **Vercel → Project → Settings → Environment Variables**
+(or leave it unset for wiring A — unset and empty behave the same):
+
+| Name | Value for A | Value for B |
+| --- | --- | --- |
+| `VITE_API_BASE_URL` | *(empty / unset)* | `https://api.cblrep.ph` |
+
+- No trailing slash and **no** `/api` suffix in B — `src/services/adminApi.js`
+  appends `/api` itself.
 - `VITE_*` values are inlined into the bundle **at build time**. Changing the
   variable requires a new deployment to take effect.
 - `VITE_API_TARGET` is dev-only (the Vite proxy target). Do **not** set it in
   Vercel.
+- In wiring A the rewrite host is hardcoded (Vercel rewrites cannot read env
+  vars), so it must match `backend/.env`'s `APP_URL`. Edit `frontend/vercel.json`
+  and redeploy whenever the tunnel host changes.
 
-Without `VITE_API_BASE_URL` the app falls back to same-origin `/api/*` and logs
-a console warning; pages load but all data requests fail.
+`./scripts/check-connections.sh` reports which wiring is in place, and fails if
+`vercel.json`'s rewrite host and `APP_URL` disagree.
 
-> On Vercel the value **must** be absolute. Vercel serves only static files —
-> there is no PHP-FPM to route a relative `/api/*` to, so an empty value means
-> every request 404s against the Vercel origin.
+> An **absolute** base URL with the rewrite still in place is not fatal but is
+> redundant: the browser then calls the tunnel cross-origin and needs CORS
+> while Vercel's rewrite sits unused. Pick one.
 
 ---
 
