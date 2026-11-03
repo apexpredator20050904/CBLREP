@@ -4,6 +4,7 @@ import '../config/community.dart';
 import '../core/feedback.dart';
 import '../core/input_sanitizer.dart';
 import '../providers/auth_provider.dart';
+import 'content_page_screen.dart';
 import '../theme/cblrep_theme.dart';
 import '../widgets/cblrep_shell.dart';
 import '../widgets/password_field.dart';
@@ -24,6 +25,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final formKey = GlobalKey<FormState>();
   final name = TextEditingController(), email = TextEditingController(), password = TextEditingController(), confirm = TextEditingController(), purok = TextEditingController();
   String barangay = trinidadBarangays.first;
+  bool privacyConsent = false;
 
   /// Inline error message shown just above the Register button. It is part of
   /// the scroll layout, so unlike a floating snackbar it can never overlap or
@@ -34,6 +36,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   void dispose() { name.dispose(); email.dispose(); password.dispose(); confirm.dispose(); purok.dispose(); super.dispose(); }
 
   Future<void> submit() async {
+    if (!privacyConsent) return;
     if (!formKey.currentState!.validate()) return;
     FocusScope.of(context).unfocus();
     setState(() => errorMessage = null); // clear the banner while retrying
@@ -44,6 +47,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             barangay: barangay,
             purokSitio: purok.text.trim(),
             password: password.text,
+            privacyConsent: privacyConsent,
           );
       if (!mounted) return;
       Feedback.success(context, 'Welcome to CBLREP, ${InputSanitizer.name(name.text)}!');
@@ -148,6 +152,28 @@ class _RegisterScreenState extends State<RegisterScreen> {
               },
             ),
             const SizedBox(height: _sectionGap),
+            Row(
+              children: [
+                Checkbox(
+                  value: privacyConsent,
+                  onChanged: (value) => setState(() => privacyConsent = value ?? false),
+                ),
+                const Text('I agree to the '),
+                TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const ContentPageScreen(slug: 'privacy-notice'),
+                    ),
+                  ),
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('Privacy Notice'),
+                ),
+              ],
+            ),
             // Error banner + retry sit inside the form flow, directly above
             // the Register button — no overlap with bottom padding anywhere.
             if (errorMessage != null) ...[
@@ -159,7 +185,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               const SizedBox(height: _fieldGap),
             ],
             FilledButton(
-              onPressed: authLoading ? null : submit,
+              onPressed: authLoading || !privacyConsent ? null : submit,
               child: Text(authLoading ? 'Creating account…' : 'Register'),
             ),
             const SizedBox(height: 8),

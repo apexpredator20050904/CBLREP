@@ -7,6 +7,7 @@ import '../core/api_service.dart';
 import '../core/feedback.dart';
 import '../providers/auth_provider.dart';
 import '../theme/cblrep_theme.dart';
+import 'content_page_screen.dart';
 
 class VerificationScreen extends StatefulWidget {
   const VerificationScreen({super.key});
@@ -26,6 +27,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
   String documentType = 'Barangay certificate';
   File? document;
   bool submitting = false;
+  bool privacyConsent = false;
 
   @override
   void initState() {
@@ -65,6 +67,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
   }
 
   Future<void> submit() async {
+    if (!privacyConsent) return;
     if (document == null) {
       Feedback.info(context, 'Choose or capture a residency document first.');
       return;
@@ -76,7 +79,12 @@ class _VerificationScreenState extends State<VerificationScreen> {
     setState(() => submitting = true);
     try {
       await ApiService.instance.submitVerification(
-          barangay: barangay, purokSitio: purok.text.trim(), documentType: documentType, document: document!);
+        barangay: barangay,
+        purokSitio: purok.text.trim(),
+        documentType: documentType,
+        document: document!,
+        privacyConsent: privacyConsent,
+      );
       if (!mounted) return;
       // Pull the new `pending` status so the profile badge updates at once.
       await context.read<AuthProvider>().refreshVerification();
@@ -138,7 +146,32 @@ class _VerificationScreenState extends State<VerificationScreen> {
         const SizedBox(height: 16),
         OutlinedButton.icon(onPressed: chooseDocument, icon: const Icon(Icons.attach_file), label: Text(document == null ? 'Capture or choose document photo' : 'Document selected')),
         const SizedBox(height: 20),
-        FilledButton(onPressed: submitting ? null : submit, child: Text(submitting ? 'Submitting…' : 'Submit for review')),
+        Row(
+          children: [
+            Checkbox(
+              value: privacyConsent,
+              onChanged: (value) => setState(() => privacyConsent = value ?? false),
+            ),
+            const Text('I agree to the '),
+            TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const ContentPageScreen(slug: 'privacy-notice'),
+                ),
+              ),
+              style: TextButton.styleFrom(
+                padding: EdgeInsets.zero,
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text('Privacy Notice'),
+            ),
+          ],
+        ),
+        FilledButton(
+          onPressed: submitting || !privacyConsent ? null : submit,
+          child: Text(submitting ? 'Submitting…' : 'Submit for review'),
+        ),
       ]),
     );
   }
