@@ -1,5 +1,19 @@
 # Building the CBLREP release APK
 
+## Which APK to hand out
+
+Each release publishes two signed APKs built from the same code but pointed at
+different APIs:
+
+| Asset | Baked-in API | Use |
+| --- | --- | --- |
+| `app-release-ngrok.apk` | the reserved ngrok tunnel | **demos and the defense** |
+| `app-release.apk` | `https://api.cblrep.ph` | production, once that host is deployed |
+
+`api.cblrep.ph` is not deployed yet, so `app-release.apk` cannot reach an API.
+For the defense, hand out **`app-release-ngrok.apk`** and keep the tunnel up
+(`./scripts/dev-tunnel.sh`).
+
 ## The API URL is compiled in
 
 The Flutter client has **no hardcoded backend host**. The production origin is
