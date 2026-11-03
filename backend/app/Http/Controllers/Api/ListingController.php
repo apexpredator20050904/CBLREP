@@ -6,8 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Models\Category;
 use App\Models\Resource;
 use App\Models\User;
+use App\Support\QuantityUnits;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
 class ListingController extends Controller
 {
@@ -116,7 +118,13 @@ class ListingController extends Controller
             'condition' => 'nullable|string|max:255',
             // How much is needed. Only meaningful on a NEED ("5 kg of rice");
             // cleared for offers, which are one thing the member already owns.
+            // `quantity` remains the legacy/free-text display string; new
+            // clients send the structured pair below.
             'quantity' => 'nullable|string|max:60',
+            'quantity_value' => 'nullable|numeric|min:0.01|max:999999',
+            'quantity_unit' => ['nullable', Rule::in(QuantityUnits::KEYS)],
+            // How soon the NEED has to be met. Cleared for offers below.
+            'urgency' => ['nullable', Rule::in(Resource::URGENCIES)],
             'location' => 'nullable|string|max:255',
             'barangay' => ['required', 'string', \App\Support\Barangays::rule()],
             'purok_sitio' => ['required', 'string', 'max:60', \App\Support\Puroks::rule()],
@@ -182,6 +190,32 @@ class ListingController extends Controller
             return response()->json(['message' => 'A price is required for a paid listing.', 'errors' => ['price' => ['A price is required for a paid listing.']]], 422);
         }
 
+        // ── Structured quantity ───────────────────────────────────────
+        // The pair is optional (old builds still send only the free-text
+        // `quantity`), but when one half is present the other must be too.
+        // Offers never keep any of it — they describe one thing the member
+        // already owns, not a shopping-list amount.
+        $hasQuantityValue = array_key_exists('quantity_value', $validated)
+            && $validated['quantity_value'] !== null;
+        $hasQuantityUnit = ! empty($validated['quantity_unit']);
+        if ($hasQuantityValue !== $hasQuantityUnit) {
+            return response()->json([
+                'message' => 'Quantity and unit must be provided together.',
+                'errors' => [
+                    ($hasQuantityValue ? 'quantity_unit' : 'quantity_value') => [
+                        'Choose a unit and enter a numeric quantity.',
+                    ],
+                ],
+            ], 422);
+        }
+        $quantityValue = $hasQuantityValue ? (float) $validated['quantity_value'] : null;
+        $quantityUnit = $hasQuantityUnit ? $validated['quantity_unit'] : null;
+        // Compose the legacy display string so older clients and the admin
+        // console keep showing "5 kg" without reading the structured fields.
+        $legacyQuantity = $quantityValue !== null
+            ? QuantityUnits::format($quantityValue, $quantityUnit)
+            : ($validated['quantity'] ?? null);
+
         $gallery = $this->storeGalleryImages($request);
 
         $resource = Resource::create([
@@ -207,9 +241,11 @@ class ListingController extends Controller
                 : null,
             'condition' => $validated['condition'] ?? 'Good',
             // How much is needed — a NEED-only field, cleared for offers.
-            'quantity' => $type === 'request'
-                ? ($validated['quantity'] ?? null)
-                : null,
+            // `quantity` keeps the composed display string for older clients.
+            'quantity' => $type === 'request' ? $legacyQuantity : null,
+            'quantity_value' => $type === 'request' ? $quantityValue : null,
+            'quantity_unit' => $type === 'request' ? $quantityUnit : null,
+            'urgency' => $type === 'request' ? ($validated['urgency'] ?? null) : null,
             'title' => $validated['title'],
             'description' => $validated['description'] ?? '',
             'location' => $validated['location'] ?? trim($validated['barangay'].', '.(\App\Support\Puroks::canonicalize($validated['purok_sitio']) ?? '')),
@@ -263,8 +299,12 @@ class ListingController extends Controller
             'images' => 'nullable|array|max:6',
             'images.*' => 'image|mimes:jpg,jpeg,png|max:5120',
             'wanted_item' => 'nullable|string|max:160',
-            // How much is needed — a NEED-only field.
+            // How much is needed — a NEED-only field. `quantity` is the legacy
+            // display string; the structured pair is the editable source.
             'quantity' => 'nullable|string|max:60',
+            'quantity_value' => 'nullable|numeric|min:0.01|max:999999',
+            'quantity_unit' => ['nullable', Rule::in(QuantityUnits::KEYS)],
+            'urgency' => ['nullable', Rule::in(Resource::URGENCIES)],
             // The direction is accepted so a client that echoes it back does
             // not 422, but it can never be CHANGED (see below). The aliases
             // match the ones `store()` accepts.
@@ -311,7 +351,11 @@ class ListingController extends Controller
         // applied explicitly below under the closed-only rule above. `type` is
         // excluded too — the direction is immutable (checked above).
         $resource->fill(collect($validated)
-            ->except(['category', 'image', 'images', 'compensation_type', 'price', 'price_negotiable', 'status', 'type'])
+            ->except([
+                'category', 'image', 'images', 'compensation_type', 'price',
+                'price_negotiable', 'quantity', 'quantity_value', 'quantity_unit',
+                'urgency', 'status', 'type',
+            ])
             ->all());
         if (array_key_exists('category', $validated)) {
             $resource->category_id = Category::findOrCreateByName($validated['category'] ?: 'Tools')->id;
@@ -358,6 +402,42 @@ class ListingController extends Controller
         // the member already owns, so the field is cleared rather than kept.
         if (! $resource->isNeed()) {
             $resource->quantity = null;
+            $resource->quantity_value = null;
+            $resource->quantity_unit = null;
+            $resource->urgency = null;
+        } else {
+            $hasQuantityValue = array_key_exists('quantity_value', $validated);
+            $hasQuantityUnit = array_key_exists('quantity_unit', $validated);
+
+            if ($hasQuantityValue || $hasQuantityUnit) {
+                // Merge with the stored pair so a client may edit just one half.
+                $value = $hasQuantityValue ? $validated['quantity_value'] : $resource->quantity_value;
+                $unit = $hasQuantityUnit ? $validated['quantity_unit'] : $resource->quantity_unit;
+                $hasValueNow = $value !== null && $value !== '';
+                $hasUnitNow = ! empty($unit);
+                if ($hasValueNow !== $hasUnitNow) {
+                    return response()->json([
+                        'message' => 'Quantity and unit must be provided together.',
+                        'errors' => [
+                            ($hasValueNow ? 'quantity_unit' : 'quantity_value') => [
+                                'Choose a unit and enter a numeric quantity.',
+                            ],
+                        ],
+                    ], 422);
+                }
+                $resource->quantity_value = $hasValueNow ? (float) $value : null;
+                $resource->quantity_unit = $hasUnitNow ? $unit : null;
+                $resource->quantity = $hasValueNow
+                    ? QuantityUnits::format((float) $value, $unit)
+                    : null;
+            } elseif (array_key_exists('quantity', $validated)) {
+                // Legacy client cleared/replaced the free-text field.
+                $resource->quantity = $validated['quantity'];
+            }
+
+            if (array_key_exists('urgency', $validated)) {
+                $resource->urgency = $validated['urgency'];
+            }
         }
         // A status change is an owner action, allowed only while the listing is
         // in an owner-controlled lifecycle state. Anything a moderator has

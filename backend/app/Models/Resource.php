@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\CanonicalizesPurokSitio;
+use App\Support\QuantityUnits;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
@@ -31,6 +32,25 @@ class Resource extends Model
         self::FREE => 'FREE SHARING',
         self::BARTER => 'BARTER',
         self::PAID => 'PAID',
+    ];
+
+    /**
+     * How soon a NEED has to be met.
+     *
+     * Only NEED listings carry an urgency; an OFFER describes something the
+     * member already has, so the controller clears the column for that
+     * direction. The keys are stored, the labels are presentation only.
+     */
+    public const URGENT = 'urgent';
+    public const THIS_WEEK = 'this_week';
+    public const FLEXIBLE = 'flexible';
+
+    public const URGENCIES = [self::URGENT, self::THIS_WEEK, self::FLEXIBLE];
+
+    public const URGENCY_LABELS = [
+        self::URGENT => 'Urgent / Today',
+        self::THIS_WEEK => 'This Week',
+        self::FLEXIBLE => 'Flexible',
     ];
 
     // ------------------------------------------------------------------
@@ -111,6 +131,11 @@ class Resource extends Model
         'price_negotiable',
         'condition',
         'quantity',
+        // Structured NEED quantity: the number, its unit key, and how soon it
+        // is needed. `quantity` stays the composed display string.
+        'quantity_value',
+        'quantity_unit',
+        'urgency',
         'title',
         'description',
         'location',
@@ -129,6 +154,7 @@ class Resource extends Model
         'is_active' => 'boolean',
         'price' => 'float',
         'price_negotiable' => 'boolean',
+        'quantity_value' => 'float',
         // Ordered list of paths; the cover is image_path.
         'image_paths' => 'array',
         // Pinned coordinates are a decimal column; cast so the payload is
@@ -301,6 +327,70 @@ class Resource extends Model
             && (bool) $this->price_negotiable;
     }
 
+    /**
+     * The NEED quantity as a display string ("5 kg").
+     *
+     * Prefers the legacy column, which the controller composes from the
+     * structured pair, so rows written by an older build keep reading the same
+     * way. If only the structured fields are present (a direct DB import), the
+     * value is formatted on the fly.
+     */
+    public function displayQuantity(): ?string
+    {
+        if (! $this->isNeed()) {
+            return null;
+        }
+        if (is_string($this->quantity) && trim($this->quantity) !== '') {
+            return $this->quantity;
+        }
+        if ($this->quantity_value !== null && QuantityUnits::isValid($this->quantity_unit)) {
+            return QuantityUnits::format((float) $this->quantity_value, $this->quantity_unit);
+        }
+
+        return null;
+    }
+
+    /** The numeric half of a NEED quantity, or null when it is free text only. */
+    public function displayQuantityValue(): ?float
+    {
+        return $this->isNeed() && $this->quantity_value !== null
+            ? (float) $this->quantity_value
+            : null;
+    }
+
+    /** The unit key for a NEED quantity, or null when it is free text only. */
+    public function displayQuantityUnit(): ?string
+    {
+        return $this->isNeed() && QuantityUnits::isValid($this->quantity_unit)
+            ? $this->quantity_unit
+            : null;
+    }
+
+    /** Human unit label ("kg", "sacks"), pluralised by the amount. */
+    public function displayQuantityUnitLabel(): ?string
+    {
+        $unit = $this->displayQuantityUnit();
+
+        return $unit === null
+            ? null
+            : QuantityUnits::label($unit, $this->displayQuantityValue());
+    }
+
+    /** The urgency key for a NEED, or null for an OFFER / unset value. */
+    public function displayUrgency(): ?string
+    {
+        return $this->isNeed() && in_array($this->urgency, self::URGENCIES, true)
+            ? $this->urgency
+            : null;
+    }
+
+    public function displayUrgencyLabel(): ?string
+    {
+        $urgency = $this->displayUrgency();
+
+        return $urgency === null ? null : (self::URGENCY_LABELS[$urgency] ?? null);
+    }
+
     // ------------------------------------------------------------------
     // Relations
     // ------------------------------------------------------------------
@@ -354,7 +444,16 @@ class Resource extends Model
             'condition' => $this->condition ?? 'Good',
             // How much is needed. Only meaningful on a NEED ("5 kg of rice");
             // cleared for offers, which are one thing the member already owns.
-            'quantity' => $this->isNeed() ? $this->quantity : null,
+            // `quantity` stays the composed display string for older clients;
+            // the structured pair is what new clients render and edit.
+            'quantity' => $this->displayQuantity(),
+            'quantity_value' => $this->displayQuantityValue(),
+            'quantity_unit' => $this->displayQuantityUnit(),
+            'quantity_unit_label' => $this->displayQuantityUnitLabel(),
+            'quantity_role' => $this->isNeed() ? 'needed' : null,
+            // How soon the NEED has to be met. OFFER rows always report null.
+            'urgency' => $this->displayUrgency(),
+            'urgency_label' => $this->displayUrgencyLabel(),
             'location' => $this->location ?? '',
             'barangay' => $this->barangay,
             'purok_sitio' => $this->purok_sitio,
