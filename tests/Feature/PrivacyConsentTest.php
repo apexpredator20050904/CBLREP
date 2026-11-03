@@ -83,6 +83,30 @@ class PrivacyConsentTest extends TestCase
         $this->assertSame('1.0', $member->fresh()->privacy_consent_version);
     }
 
+    public function test_verified_member_cannot_submit_verification_again(): void
+    {
+        Storage::fake('local');
+        $member = $this->member();
+        $member->forceFill([
+            'is_verified' => true,
+            'verification_status' => 'verified',
+        ])->save();
+
+        $this->actingAs($member)->post('/api/verification', [
+            'barangay' => 'Poblacion',
+            'purok_sitio' => 'Purok 3',
+            'document_type' => 'Barangay certificate',
+            'document' => UploadedFile::fake()->create('proof.jpg', 10, 'image/jpeg'),
+            'privacy_consent' => true,
+        ], ['Accept' => 'application/json'])
+            ->assertStatus(409)
+            ->assertJsonPath('message', 'Your residency is already verified. You do not need to submit documents again.');
+
+        $this->assertTrue($member->fresh()->is_verified);
+        $this->assertSame('verified', $member->fresh()->verification_status);
+        Storage::disk('local')->assertDirectoryEmpty('verification-documents');
+    }
+
     private function member(): User
     {
         return User::create([

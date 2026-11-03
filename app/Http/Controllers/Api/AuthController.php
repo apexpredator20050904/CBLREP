@@ -293,6 +293,13 @@ class AuthController extends Controller
 
     public function submitVerification(Request $request)
     {
+        $user = $request->user();
+        if ($user->is_verified || $user->verification_status === 'verified') {
+            return response()->json([
+                'message' => 'Your residency is already verified. You do not need to submit documents again.',
+            ], 409);
+        }
+
         $validated = $request->validate([
             'barangay' => ['required', 'string', \App\Support\Barangays::rule()],
             'purok_sitio' => ['required', 'string', 'max:60', \App\Support\Puroks::rule()],
@@ -301,7 +308,6 @@ class AuthController extends Controller
             'privacy_consent' => ['required', 'accepted'],
         ]);
 
-        $user = $request->user();
         // Proof of residency (address / valid ID) is sensitive, so it goes on
         // the PRIVATE disk. On the public disk it was directly reachable at a
         // guessable /storage/verification-documents/… URL with no auth — the
