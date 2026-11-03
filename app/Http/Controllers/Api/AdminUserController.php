@@ -130,12 +130,12 @@ class AdminUserController extends Controller
             'student_school' => ['nullable', 'string', 'max:255'],
         ]);
 
-        // Single-account lockdown: no new admin accounts may be created.
-        // The system is restricted to one Super Admin only.
-        if (in_array($validated['role'], [User::ROLE_ADMIN, User::ROLE_SUPER_ADMIN], true)) {
-            throw ValidationException::withMessages([
-                'role' => 'Administrator account creation is disabled. Only the designated Super Admin may access the system.',
-            ]);
+        // A regular admin manages member accounts only. Creating another
+        // administrator is a super-admin action, mirroring the role-change
+        // and delete rules above.
+        if (in_array($validated['role'], [User::ROLE_ADMIN, User::ROLE_SUPER_ADMIN], true)
+            && ! $actor->isSuperAdmin()) {
+            abort(403, 'Only a Super Administrator can create administrator accounts.');
         }
 
         $user = User::create([
@@ -341,12 +341,6 @@ class AdminUserController extends Controller
         /** @var User $user */
         $user = User::findOrFail($id);
 
-        // Single-account lockdown: no role changes that would create additional admins.
-        if ($validated['role'] !== User::ROLE_USER) {
-            throw ValidationException::withMessages([
-                'role' => 'Role changes are restricted. Only the designated Super Admin may access the system.',
-            ]);
-        }
         if ($user->id === $actor->id) {
             throw ValidationException::withMessages(['role' => 'You cannot change your own role.']);
         }

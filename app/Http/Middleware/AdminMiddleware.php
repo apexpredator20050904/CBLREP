@@ -10,12 +10,16 @@ use Laravel\Sanctum\PersonalAccessToken;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * RBAC middleware — ensures only the designated Super Administrator reaches
- * the /api/admin/* route group.
+ * RBAC middleware — ensures only an administrator reaches the /api/admin/*
+ * route group.
  *
- * Single-account lockdown: only the account matching SUPER_ADMIN_EMAIL
- * may authenticate into the admin panel. All other accounts — including
- * other super_admin or admin role holders — are rejected with 403.
+ * Both administrator tiers are allowed through:
+ *   - admin        — day-to-day moderation and member management
+ *   - super_admin  — everything an admin can do, plus role changes and deletes
+ *
+ * The role is the only identity check. There is no email allow-list: any
+ * account holding an administrator role has the same access, and finer
+ * restrictions (destructive/role actions) live in SuperAdminMiddleware.
  *
  * Second check — the token must have completed 2FA:
  *
@@ -34,22 +38,21 @@ class AdminMiddleware
     /** Token name minted only after a verified TOTP or recovery code. */
     public const TWO_FACTOR_TOKEN = 'cblrep-admin-2fa';
 
-    /**
-     * The single authorised Super Administrator email.
-     *
-     * Only this account may access the admin panel. No other accounts
-     * may be created or authenticated.
-     */
-    public const SUPER_ADMIN_EMAIL = 'admin@cblrep.ph';
-
     public function handle(Request $request, Closure $next): Response
     {
         $user = $request->user();
 
-        // Single-account lockdown: only the designated Super Admin may proceed.
-        if (! $user || $user->email !== self::SUPER_ADMIN_EMAIL) {
+        // Role-based authorization: admin or super_admin only.
+        if (! $user || ! $user->isAdmin()) {
             return response()->json([
-                'message' => 'Unauthorized. Only the designated Super Administrator may access this area.',
+                'message' => 'Unauthorized. Administrator access is required.',
+            ], 403);
+        }
+
+        // A suspended administrator keeps the role but loses access at once.
+        if ($user->account_status === 'suspended') {
+            return response()->json([
+                'message' => 'This administrator account is suspended.',
             ], 403);
         }
 

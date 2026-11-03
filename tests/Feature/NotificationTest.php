@@ -43,33 +43,18 @@ class NotificationTest extends TestCase
         ]);
     }
 
-    /** The one account the admin middleware lets through. */
+    /** A throwaway administrator — authorization is by role, not e-mail. */
     private function admin(): User
     {
-        $admin = User::where('email', 'admin@cblrep.ph')->first();
-
-        if (! $admin) {
-            $admin = User::create([
-                'name' => 'Super Admin',
-                'email' => 'admin@cblrep.ph',
-                'password' => bcrypt('secret1234'),
-                'role' => 'super_admin',
-                'barangay' => 'Poblacion',
-                'barangay_or_location' => 'Poblacion',
-                'purok_sitio' => 'Purok 1',
-            ]);
-        }
-
-        // The real admin has enrolled in TOTP; a session-auth test token can
-        // never satisfy that gate. Disabling it inside the transaction (rolled
-        // back afterwards) is what lets us exercise the admin endpoints.
-        $admin->forceFill([
-            'two_factor_enabled' => false,
-            'two_factor_secret' => null,
-            'two_factor_confirmed_at' => null,
-        ])->save();
-
-        return $admin;
+        return User::create([
+            'name' => 'Super Admin '.uniqid(),
+            'email' => 'admin-'.uniqid().'@example.test',
+            'password' => bcrypt('secret1234'),
+            'role' => User::ROLE_SUPER_ADMIN,
+            'barangay' => 'Poblacion',
+            'barangay_or_location' => 'Poblacion',
+            'purok_sitio' => 'Purok 1',
+        ]);
     }
 
     private function listingFor(User $owner, string $title = 'A borrowed drill'): Resource

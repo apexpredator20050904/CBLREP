@@ -29,24 +29,23 @@ use Tests\TestCase;
 class AdminConsolePayloadTest extends TestCase
 {
     /**
-     * A bearer token for the ONE account the console accepts.
+     * A bearer token for a throwaway administrator.
      *
-     * The admin route group is behind AdminMiddleware, which allows only
-     * `admin@cblrep.ph` and only a token minted by the 2FA flow — so the
-     * test has to speak the same protocol the real console does.
+     * The admin route group is behind AdminMiddleware, which authorizes by
+     * role. The token carries the name the 2FA flow uses so the test speaks
+     * the same protocol as the real console, without touching the seeded
+     * account (which has TOTP enrolled).
      */
     private function adminToken(): string
     {
-        $admin = User::firstOrCreate(
-            ['email' => AdminMiddleware::SUPER_ADMIN_EMAIL],
-            [
-                'name' => 'Administrator',
-                'password' => bcrypt('secret1234'),
-                'role' => User::ROLE_SUPER_ADMIN,
-                'barangay' => 'Poblacion',
-                'barangay_or_location' => 'Poblacion',
-            ],
-        );
+        $admin = User::create([
+            'name' => 'Administrator '.uniqid(),
+            'email' => 'admin-'.uniqid().'@example.test',
+            'password' => bcrypt('secret1234'),
+            'role' => User::ROLE_SUPER_ADMIN,
+            'barangay' => 'Poblacion',
+            'barangay_or_location' => 'Poblacion',
+        ]);
 
         return $admin->createToken(AdminMiddleware::TWO_FACTOR_TOKEN)->plainTextToken;
     }

@@ -13,6 +13,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rules\Password;
 use Throwable;
@@ -44,6 +45,7 @@ class AuthController extends Controller
             'barangay' => ['required', 'string', \App\Support\Barangays::rule()],
             'purok_sitio' => ['required', 'string', 'max:60', \App\Support\Puroks::rule()],
             'password' => ['required', Password::min(8)],
+            'privacy_consent' => ['required', 'accepted'],
         ], [
             'fullName.unique' => 'An account with this full name is already registered.',
             'email.unique' => 'An account with this email is already registered.',
@@ -69,6 +71,8 @@ class AuthController extends Controller
             'password' => $validated['password'], // hashed via model cast
             'role' => 'user',
             'is_verified' => false,
+            'privacy_consent_at' => now(),
+            'privacy_consent_version' => '1.0',
         ]);
 
         return response()->json([
@@ -294,6 +298,7 @@ class AuthController extends Controller
             'purok_sitio' => ['required', 'string', 'max:60', \App\Support\Puroks::rule()],
             'document_type' => ['required', 'string', 'max:100'],
             'document' => ['required', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
+            'privacy_consent' => ['required', 'accepted'],
         ]);
 
         $user = $request->user();
@@ -315,6 +320,8 @@ class AuthController extends Controller
             // re-submission starts the queue fresh.
             'verification_submitted_at' => now(),
             'verification_note' => null,
+            'privacy_consent_at' => now(),
+            'privacy_consent_version' => '1.0',
         ]);
 
         return response()->json([
@@ -481,8 +488,11 @@ class AuthController extends Controller
         );
 
         try {
-            $user->notify(new ResetPasswordCode($code, $user->name, self::RESET_CODE_TTL));
+            // Send synchronously so SMTP failures can be reported to the
+            // caller; ResetPasswordCode remains queueable for other callers.
+            Notification::sendNow($user, new ResetPasswordCode($code, $user->name, self::RESET_CODE_TTL));
         } catch (Throwable $exception) {
+            DB::table('password_reset_tokens')->where('email', $email)->delete();
             report($exception);
 
             return response()->json([

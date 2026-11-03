@@ -21,10 +21,12 @@ class SuperAdminMiddleware
     {
         $user = $request->user();
 
-        // Single-account lockdown: only the designated Super Admin may proceed.
-        if (! $user || $user->email !== AdminMiddleware::SUPER_ADMIN_EMAIL) {
+        // Role-based authorization: the super_admin tier only. A regular
+        // admin is a legitimate console user but may not change roles or
+        // delete accounts.
+        if (! $user || ! $user->isSuperAdmin()) {
             return response()->json([
-                'message' => 'Unauthorized. Only the designated Super Administrator may perform this action.',
+                'message' => 'Unauthorized. Super Administrator access is required for this action.',
             ], 403);
         }
 

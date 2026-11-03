@@ -46,36 +46,24 @@ class ContentReportTest extends TestCase
     }
 
     /**
-     * The one account the admin middleware lets through.
+     * A throwaway administrator.
      *
-     * The admin area is a single-account lockdown keyed on the Super
-     * Administrator's e-mail, and the real account has enrolled in TOTP —
-     * a session-auth test token can never satisfy that gate, so the second
-     * factor is switched off inside the transaction (rolled back afterwards).
+     * Authorization is by role, so the test creates its own super_admin
+     * instead of depending on the seeded account (which has TOTP enrolled).
+     * No second factor is enrolled, so the session-auth request passes the
+     * middleware's 2FA check as it does for a real unenrolled admin.
      */
     private function admin(): User
     {
-        $admin = User::where('email', 'admin@cblrep.ph')->first();
-
-        if (! $admin) {
-            $admin = User::create([
-                'name' => 'Super Admin '.uniqid(),
-                'email' => 'admin@cblrep.ph',
-                'password' => bcrypt('secret1234'),
-                'role' => 'super_admin',
-                'barangay' => 'Poblacion',
-                'barangay_or_location' => 'Poblacion',
-                'purok_sitio' => 'Purok 1',
-            ]);
-        }
-
-        $admin->forceFill([
-            'two_factor_enabled' => false,
-            'two_factor_secret' => null,
-            'two_factor_confirmed_at' => null,
-        ])->save();
-
-        return $admin;
+        return User::create([
+            'name' => 'Super Admin '.uniqid(),
+            'email' => 'admin-'.uniqid().'@example.test',
+            'password' => bcrypt('secret1234'),
+            'role' => User::ROLE_SUPER_ADMIN,
+            'barangay' => 'Poblacion',
+            'barangay_or_location' => 'Poblacion',
+            'purok_sitio' => 'Purok 1',
+        ]);
     }
 
     /** A listing owned by $owner. */

@@ -3,6 +3,7 @@
 namespace App\Notifications;
 
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
@@ -11,7 +12,7 @@ use Illuminate\Notifications\Notification;
  * flow. Deliberately short-lived and single-use (the controller deletes the
  * row from password_reset_tokens as soon as it is redeemed).
  */
-class ResetPasswordCode extends Notification
+class ResetPasswordCode extends Notification implements ShouldQueue
 {
     use Queueable;
 

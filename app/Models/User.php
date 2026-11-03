@@ -38,6 +38,8 @@ class User extends Authenticatable
         'verification_document_type',
         'verification_submitted_at',
         'verification_note',
+        'privacy_consent_at',
+        'privacy_consent_version',
         // Needed so AuthController::submitVerification() and the admin
         // approve/reject paths can flip the review lifecycle. Without this,
         // submissions persisted the proof but the status silently stayed
@@ -72,6 +74,7 @@ class User extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
+            'privacy_consent_at' => 'datetime',
             'password' => 'hashed',
             'is_verified' => 'boolean',
             'student_status' => 'boolean',
@@ -403,6 +406,8 @@ class User extends Authenticatable
             'verification_document_type' => $this->verification_document_type,
             'verification_note' => $this->verification_note,
             'verification_submitted_at' => $this->verification_submitted_at?->toISOString(),
+            'privacy_consent_at' => $this->privacy_consent_at?->toISOString(),
+            'privacy_consent_version' => $this->privacy_consent_version,
             'account_status' => $this->accountStatusLabel(),
             'barangay_or_location' => $this->barangay_or_location,
             'barangay' => $this->barangay,
