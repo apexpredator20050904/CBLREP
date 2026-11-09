@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Category;
 use App\Models\Exchange;
+use App\Models\MemberNotification;
 use App\Models\Resource;
 use App\Models\User;
 use Tests\TestCase;
@@ -166,6 +167,59 @@ class NeedFulfilmentTest extends TestCase
             'is_active' => false,
             'status' => 'traded',
         ]);
+    }
+
+    public function test_the_first_confirmation_nudges_the_other_party(): void
+    {
+        $poster = $this->member('poster@example.test');
+        $supplier = $this->member('supplier@example.test');
+        $need = $this->need($poster);
+
+        $id = $this->actingAs($supplier)
+            ->postJson('/api/exchanges', [
+                'resource_id' => $need->id,
+                'offered_item' => '2 hours of childcare',
+                'barangay' => 'Poblacion',
+                'purok_sitio' => 'Purok 3',
+            ])
+            ->assertCreated()
+            ->json('exchange.id');
+
+        $this->actingAs($poster)
+            ->patchJson("/api/exchanges/{$id}", ['status' => 'accepted'])
+            ->assertStatus(200);
+
+        // The supplier records their half. The handover is not confirmed yet,
+        // so the poster must be told that their own confirmation is still owed.
+        $this->actingAs($supplier)
+            ->postJson("/api/exchanges/{$id}/confirm-completion")
+            ->assertStatus(200)
+            ->assertJsonPath('exchange.raw_status', 'accepted');
+
+        $nudges = fn (User $user) => MemberNotification::where('user_id', $user->id)->get()
+            ->filter(fn (MemberNotification $n) => ($n->data['status'] ?? null) === 'awaiting_confirmation');
+
+        $this->assertCount(1, $nudges($poster), 'The other party must be told it is their turn.');
+        $this->assertSame('Confirm the handover', $nudges($poster)->first()->title);
+
+        // The member who confirmed is not nudged about their own tap.
+        $this->assertCount(0, $nudges($supplier));
+
+        // Re-confirming the same half is idempotent and must not nudge twice.
+        $this->actingAs($supplier)
+            ->postJson("/api/exchanges/{$id}/confirm-completion")
+            ->assertStatus(200);
+        $this->assertCount(1, $nudges($poster), 'A repeat confirmation must not send a second nudge.');
+
+        // The poster confirming completes the trade and tells the supplier.
+        $this->actingAs($poster)
+            ->postJson("/api/exchanges/{$id}/confirm-completion")
+            ->assertStatus(200)
+            ->assertJsonPath('exchange.raw_status', 'completed');
+
+        $this->assertSame(1, MemberNotification::where('user_id', $supplier->id)->get()
+            ->filter(fn (MemberNotification $n) => ($n->data['status'] ?? null) === 'completed')
+            ->count());
     }
 
     public function test_the_supplier_cannot_fulfil_their_own_need(): void
