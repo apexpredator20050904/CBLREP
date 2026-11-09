@@ -59,9 +59,12 @@ php artisan db:seed --class=DemoSeeder   # optional demo listings, additive
 php artisan serve --host=127.0.0.1 --port=8000
 ```
 
-`db:seed` creates the administrator — `admin@cblrep.ph` / `adminpass123` —
-enrols TOTP 2FA and prints the secret. `DemoSeeder` adds the demo listings
-and members on top, and never deletes anything.
+`db:seed` creates the administrator — `admin@cblrep.ph` / `adminpass123`
+(**local demo only — change before any real deployment**) — enrols TOTP 2FA
+and prints the secret. It reads `ADMIN_SEED_EMAIL` / `ADMIN_SEED_PASSWORD`
+from the environment, and in production refuses to run without `--force`
+and refuses to fall back to the demo password. `DemoSeeder` adds the demo
+listings and members on top, and never deletes anything.
 
 ### 2. The tunnel
 
@@ -132,6 +135,15 @@ The rule lives in the code, not only in this paragraph:
 [`backend/app/Models/Exchange.php`](backend/app/Models/Exchange.php) explains
 it, `ExchangeController` enforces it on every request — a hand-crafted one
 included — and `BarterCollapseTest` pins it down in CI on every push.
+
+## Known limitations
+
+- Registration does not verify email addresses; mandatory verification is
+  deferred to avoid disrupting the capstone defense.
+- The defense demo depends on ngrok and the laptop hosting the API being online.
+- The current deployment is a single API instance, without high availability.
+- `scripts/make_defense_backup.sh` passes the database password to `mysqldump`
+  on the command line.
 
 ## CI and releases
 

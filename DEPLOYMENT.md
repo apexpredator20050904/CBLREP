@@ -228,6 +228,10 @@ npm run start     # serve ./dist locally, then hard-refresh /admin/listings
 
 The console is useless without a reachable API. On the API host:
 
+- The seeded login `admin@cblrep.ph` / `adminpass123` is **local demo only —
+  change before any real deployment**. Set `ADMIN_SEED_EMAIL` and
+  `ADMIN_SEED_PASSWORD` in the server environment; prefer `php artisan
+  admin:create` for a live server because `db:seed` truncates every table.
 - `APP_URL=https://api.your-domain.com`, `APP_ENV=production`, `APP_DEBUG=false`
 - `php artisan config:cache && php artisan route:cache`
 - **CORS** — add the Vercel domain(s) to `backend/config/cors.php`:

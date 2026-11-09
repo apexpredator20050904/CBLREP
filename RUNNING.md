@@ -87,6 +87,28 @@ publicly reachable host for the whole project — API, admin console and mobile
 app all point at it. (The production Debian/nginx runbook uses
 `https://api.cblrep.ph` instead; see `backend/deploy/DEPLOY_DEBIAN.md`).
 
+### SMTP for real email delivery
+
+The default `MAIL_MAILER=log` is intentionally unchanged. To send password
+reset codes, create a free Brevo account, verify a sender address, then copy
+the SMTP login and generated SMTP key from Brevo's SMTP/API settings into
+`backend/.env`:
+
+```dotenv
+MAIL_MAILER=smtp
+MAIL_HOST=smtp-relay.brevo.com
+MAIL_PORT=587
+MAIL_ENCRYPTION=tls
+MAIL_USERNAME=your-brevo-smtp-login
+MAIL_PASSWORD=your-brevo-smtp-key
+MAIL_FROM_ADDRESS=verified-sender@example.com
+MAIL_FROM_NAME=CBLREP
+```
+
+Keep these credentials out of git, then verify delivery with
+`php artisan mail:test you@example.com`. Gmail is another option when the
+account has 2-Step Verification enabled and uses a Google App Password.
+
 ### 2.3 Create the database
 
 ```bash
@@ -111,6 +133,11 @@ php artisan migrate:status         # confirm everything is "Ran"
 php artisan db:seed --force
 ```
 
+The seeder reads `ADMIN_SEED_EMAIL` / `ADMIN_SEED_PASSWORD` from
+`backend/.env`. In production it refuses to run without `--force` and refuses
+to fall back to the local demo password; **change both values before any real
+deployment**.
+
 **Seeded super admin** — created by `backend/database/seeders/DatabaseSeeder.php`,
 which also enrols TOTP 2FA and prints the secret plus one-time recovery codes
 to the console:
@@ -120,7 +147,7 @@ Email:    admin@cblrep.ph
 Password: adminpass123
 ```
 
-> Change this password immediately outside local development. Re-running
+> **Local demo only — change before any real deployment.** Re-running
 > `db:seed` wipes all data (users, listings, messages, conversations) and
 > re-creates only this account.
 
@@ -133,7 +160,9 @@ php artisan db:seed --class=DemoSeeder
 Creates the category set, listings, barter proposals, conversations and four
 member accounts (`maria.santos@cblrep.test`, `pedro.reyes@cblrep.test`,
 `ana.delacruz@cblrep.test`, `jose.lim@cblrep.test` — all with password
-`Demo@1234`).
+`Demo@1234`). It also creates a draft `privacy-notice` ContentPage for
+municipal review; confirm the contact details and retention period before
+publishing it.
 
 ### 2.5 Link uploaded media
 
@@ -211,7 +240,7 @@ terminal:
 | | |
 | --- | --- |
 | **URL** | `https://cblrep-frontend.vercel.app` |
-| **Sign in** | `admin@cblrep.ph` / `adminpass123`, then the 6-digit TOTP from your authenticator app |
+| **Sign in** | `admin@cblrep.ph` / `adminpass123` (**local demo only — change before any real deployment**), then the 6-digit TOTP from your authenticator app |
 | **2FA enrolment** | The QR and the manual entry key are shown by the sign-in screen itself; the seeder also prints them (§2.4) |
 
 **The console's data comes from this machine**, through the ngrok tunnel, so
@@ -660,8 +689,9 @@ relative `/api/*` and the Vite proxy forwards them to `VITE_API_TARGET`
 frontend. The **deployed** console is same-origin on Vercel and its `/api/*` is
 proxied to the tunnel by a rewrite (§3.2, `DEPLOYMENT.md`).
 
-Sign in with `admin@cblrep.ph` / `adminpass123` plus the TOTP code from your
-authenticator app (§2.4, §3.1).
+Sign in with `admin@cblrep.ph` / `adminpass123` (local demo only — change
+before any real deployment) plus the TOTP code from your authenticator app
+(§2.4, §3.1).
 
 ### 6.2 Mobile client
 
@@ -877,6 +907,9 @@ POST /api/admin/2fa/verify → stage 2: TOTP code, returns the Sanctum token
 
 With `MAIL_MAILER=log`, password-reset codes are readable in
 `backend/storage/logs/laravel.log`.
+With SMTP configured, use `php artisan mail:test you@example.com` to diagnose
+delivery; a failed reset e-mail returns a retryable service error instead of
+an application error page.
 
 ### 7.8 The console signs me out, or its tables stay empty
 
@@ -972,5 +1005,41 @@ adb install -r build/app/outputs/flutter-apk/app-release.apk
 | Laravel API (ngrok) | `https://contest-bunny-unsorted.ngrok-free.dev/api` |
 | API health | `…/api/platform/status` |
 | Admin dev server | `http://localhost:5173` |
-| Seeded admin | `admin@cblrep.ph` / `adminpass123` (+ TOTP from seeder output) |
+| Seeded admin | `admin@cblrep.ph` / `adminpass123` (**local demo only — change before any real deployment**) (+ TOTP from seeder output) |
 | Seeded demo members | `maria.santos@cblrep.test` etc. / `Demo@1234` |
+
+## 10. Defense day runbook
+
+### Before the panel arrives
+
+- Plug the laptop into power and disable sleep / lid-close suspend for the
+  duration of the demo.
+- Confirm the ngrok account is authenticated and the reserved host in
+  `backend/.env` (`APP_URL`) matches `frontend/vercel.json`.
+- Download the **`app-release-ngrok.apk`** release asset to the laptop. It is
+  the defense build; do not install the production-host `app-release.apk`.
+
+### Startup order
+
+1. Start MariaDB: `sudo systemctl start mariadb`.
+2. Start the API in a terminal and leave it running:
+   `cd backend && php artisan serve --host=127.0.0.1 --port=8000`.
+3. From the repository root, start the tunnel and leave its terminal running:
+   `./scripts/dev-tunnel.sh`.
+4. Run `./scripts/check-connections.sh`. It checks the database, API, tunnel,
+   Vercel rewrite, an admin login (enter the current TOTP when prompted), and
+   that the APK's compiled API host matches the tunnel.
+   If the APK is elsewhere, use
+   `MOBILE_APK=/path/to/app-release-ngrok.apk ./scripts/check-connections.sh`.
+5. Install the same build on the demo phone:
+   `adb install -r /path/to/app-release-ngrok.apk`.
+
+### Backup and fallback
+
+Run `./scripts/make_defense_backup.sh` to produce the backup bundle under
+`storage/backups/`. Keep the private `-SECRETS` archive separate and do not
+share it.
+
+If the live demo becomes unavailable, use the prepared screen recording and
+screenshots stored offline on the laptop/phone, explain the tunnel or network
+issue, and continue the presentation from those materials.
