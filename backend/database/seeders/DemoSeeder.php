@@ -49,6 +49,7 @@ class DemoSeeder extends Seeder
         $this->seedExchanges($members, $listings);
         $this->seedConversations($members, $listings);
         $this->seedExampleContentPage();
+        $this->seedPrivacyNotice();
 
         $this->command->info('─────────────────────────────────────────────');
         $this->command->info('  Demo data ready (non-destructive)');
@@ -90,6 +91,36 @@ class DemoSeeder extends Seeder
         );
 
         $this->command->info('  Public example page: /page/waste-segregation-guide');
+    }
+
+    /** Draft notice for municipal review before it is published. */
+    private function seedPrivacyNotice(): void
+    {
+        $adminId = User::query()->whereIn('role', [User::ROLE_ADMIN, User::ROLE_SUPER_ADMIN])
+            ->orderBy('id')
+            ->value('id');
+
+        ContentPage::firstOrCreate(
+            ['slug' => 'privacy-notice'],
+            [
+                'title' => 'Privacy Notice',
+                'body' => '<p><strong>DRAFT — for Municipality of Trinidad, Bohol review. '
+                    .'Confirm the retention period and official data-request contact before publication.</strong></p>'
+                    .'<p>This notice is prepared in accordance with the Data Privacy Act of 2012 (Republic Act No. 10173).</p>'
+                    .'<h2>Information collected</h2>'
+                    .'<p>CBLREP collects your name, email address, barangay and purok/sitio, and residency documents such as a valid ID or proof of address.</p>'
+                    .'<h2>Purpose</h2>'
+                    .'<p>This information is used for resident verification and community moderation.</p>'
+                    .'<h2>Who can see it</h2>'
+                    .'<p>Only municipal administrators assigned to verification and moderation can access this information. Residency documents are not public.</p>'
+                    .'<h2>Retention</h2>'
+                    .'<p>The municipality must confirm and publish a specific retention period. Information should be retained only as long as needed for verification, moderation, and applicable records-retention requirements.</p>'
+                    .'<h2>Data requests</h2>'
+                    .'<p>For access, correction, or other data-privacy requests, contact the Municipality of Trinidad, Bohol through its official municipal office. The municipality must add and confirm its official Data Protection Officer or data-request contact details before publishing this notice.</p>',
+                'status' => 'draft',
+                'created_by' => $adminId,
+            ]
+        );
     }
 
     /** @return array<string,Category> keyed by name */

@@ -204,6 +204,7 @@ class AvatarTest extends TestCase
             'purok_sitio' => 'Purok 3',
             'document_type' => 'Barangay certificate',
             'document' => UploadedFile::fake()->create('proof.jpg', 10, 'image/jpeg'),
+            'privacy_consent' => true,
         ])->assertOk();
 
         $path = $member->fresh()->verification_document_path;

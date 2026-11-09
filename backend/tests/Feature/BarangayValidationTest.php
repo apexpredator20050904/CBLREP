@@ -116,6 +116,7 @@ class BarangayValidationTest extends TestCase
             'barangay' => 'Poblacion',
             'purok_sitio' => 'purok 4',
             'password' => 'secret1234',
+            'privacy_consent' => true,
         ])->assertCreated();
 
         $this->assertDatabaseHas('users', [
@@ -139,6 +140,7 @@ class BarangayValidationTest extends TestCase
             'barangay' => 'Poblacion',
             'purok_sitio' => 'Purok 1',
             'password' => 'secret1234',
+            'privacy_consent' => true,
         ])->assertStatus(422);
     }
 
@@ -157,6 +159,7 @@ class BarangayValidationTest extends TestCase
             'barangay' => 'Poblacion',
             'purok_sitio' => 'Purok 1',
             'password' => 'secret1234',
+            'privacy_consent' => true,
         ])->assertStatus(422);
     }
 
@@ -168,6 +171,7 @@ class BarangayValidationTest extends TestCase
             'barangay' => 'Tagum Norte',
             'purok_sitio' => 'Purok 2',
             'password' => 'secret1234',
+            'privacy_consent' => true,
         ])->assertCreated();
 
         $this->assertDatabaseHas('users', ['email' => 'ana@example.test']);
@@ -181,6 +185,7 @@ class BarangayValidationTest extends TestCase
             'barangay' => 'Manila',
             'purok_sitio' => 'Purok 2',
             'password' => 'secret1234',
+            'privacy_consent' => true,
         ])->assertStatus(422);
     }
 }
