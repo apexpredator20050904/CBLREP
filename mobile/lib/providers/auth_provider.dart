@@ -140,10 +140,18 @@ class AuthProvider extends ChangeNotifier {
     required String barangay,
     required String purokSitio,
     required String password,
+    required bool privacyConsent,
   }) async {
     error = null;
     try {
-      await api.register(fullName: name, email: email, barangay: barangay, purokSitio: purokSitio, password: password);
+      await api.register(
+        fullName: name,
+        email: email,
+        barangay: barangay,
+        purokSitio: purokSitio,
+        password: password,
+        privacyConsent: privacyConsent,
+      );
       // The register screen has no "Remember me" box, so a brand-new member
       // gets the persistent session they would have chosen by default — they
       // are never bounced back to the sign-in form after their first restart.

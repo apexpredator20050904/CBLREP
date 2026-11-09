@@ -490,6 +490,7 @@ class ApiService {
     required String barangay,
     required String purokSitio,
     required String password,
+    required bool privacyConsent,
   }) async {
     return Map<String, dynamic>.from(await _request(_dio.post('/register', data: {
       'fullName': fullName,
@@ -497,6 +498,7 @@ class ApiService {
       'barangay': barangay,
       'purok_sitio': purokSitio,
       'password': password,
+      'privacy_consent': privacyConsent,
     })) as Map);
   }
 
@@ -710,6 +712,7 @@ class ApiService {
     required String purokSitio,
     required String documentType,
     required File document,
+    required bool privacyConsent,
   }) async {
     return Map<String, dynamic>.from(await _request(_dio.post(
       '/verification',
@@ -718,6 +721,7 @@ class ApiService {
         'purok_sitio': purokSitio,
         'document_type': documentType,
         'document': await MultipartFile.fromFile(document.path),
+        'privacy_consent': privacyConsent ? '1' : '0',
       }),
     )) as Map);
   }
@@ -924,15 +928,6 @@ class ApiService {
   /// DELETE /messages/{id} — remove a message you sent.
   Future<void> deleteMessage(int messageId) async {
     await _request(_dio.delete('/messages/$messageId'));
-  }
-
-  Future<List<dynamic>> messages() async {
-    try {
-      final data = await _request(_dio.get('/messages')) as Map;
-      return List<dynamic>.from(data['messages'] ?? const []);
-    } on ApiException {
-      return const [];
-    }
   }
 
   Future<Map<String, dynamic>> sendMessage(Map<String, dynamic> payload) async =>

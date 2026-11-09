@@ -7,6 +7,7 @@ import '../core/api_service.dart';
 import '../core/feedback.dart';
 import '../providers/auth_provider.dart';
 import '../theme/cblrep_theme.dart';
+import 'content_page_screen.dart';
 
 class VerificationScreen extends StatefulWidget {
   const VerificationScreen({super.key});
@@ -26,6 +27,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
   String documentType = 'Barangay certificate';
   File? document;
   bool submitting = false;
+  bool privacyConsent = false;
 
   @override
   void initState() {
@@ -35,8 +37,8 @@ class _VerificationScreenState extends State<VerificationScreen> {
     final saved = context.read<AuthProvider>().user?.barangay;
     if (saved != null && trinidadBarangays.contains(saved)) {
       barangay = saved;
-    final savedPurok = context.read<AuthProvider>().user?.purokSitio;
-    if (savedPurok != null && savedPurok.isNotEmpty) purok.text = savedPurok;
+      final savedPurok = context.read<AuthProvider>().user?.purokSitio;
+      if (savedPurok != null && savedPurok.isNotEmpty) purok.text = savedPurok;
     }
   }
 
@@ -45,26 +47,33 @@ class _VerificationScreenState extends State<VerificationScreen> {
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       builder: (sheetContext) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(
-            leading: const Icon(Icons.photo_camera_outlined),
-            title: const Text('Take a photo'),
-            onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
-          ),
-          ListTile(
-            leading: const Icon(Icons.photo_library_outlined),
-            title: const Text('Choose from gallery'),
-            onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
-          ),
-        ]),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Take a photo'),
+              onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose from gallery'),
+              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
+            ),
+          ],
+        ),
       ),
     );
     if (source == null) return;
-    final picked = await ImagePicker().pickImage(source: source, imageQuality: 85);
+    final picked = await ImagePicker().pickImage(
+      source: source,
+      imageQuality: 85,
+    );
     if (picked != null && mounted) setState(() => document = File(picked.path));
   }
 
   Future<void> submit() async {
+    if (!privacyConsent) return;
     if (document == null) {
       Feedback.info(context, 'Choose or capture a residency document first.');
       return;
@@ -76,7 +85,12 @@ class _VerificationScreenState extends State<VerificationScreen> {
     setState(() => submitting = true);
     try {
       await ApiService.instance.submitVerification(
-          barangay: barangay, purokSitio: purok.text.trim(), documentType: documentType, document: document!);
+        barangay: barangay,
+        purokSitio: purok.text.trim(),
+        documentType: documentType,
+        document: document!,
+        privacyConsent: privacyConsent,
+      );
       if (!mounted) return;
       // Pull the new `pending` status so the profile badge updates at once.
       await context.read<AuthProvider>().refreshVerification();
@@ -84,7 +98,8 @@ class _VerificationScreenState extends State<VerificationScreen> {
       await Feedback.alert(
         context,
         title: 'Verification submitted',
-        message: 'Your $documentType for $barangay is now queued for admin review. '
+        message:
+            'Your $documentType for $barangay is now queued for admin review. '
             'You will be notified once a decision is made.',
         icon: Icons.verified_outlined,
       );
@@ -104,42 +119,123 @@ class _VerificationScreenState extends State<VerificationScreen> {
     final dark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       appBar: AppBar(title: const Text('Residency verification')),
-      body: ListView(padding: const EdgeInsets.all(16), children: [
-        _StatusBanner(status: status),
-        const SizedBox(height: 16),
-        Text('Submit a document proving your residency in Trinidad, Bohol. An administrator will review it in the Verification queue.', style: TextStyle(color: dark ? Colors.white70 : Colors.black54)),
-        // Encouraged, never required: a profile photo helps neighbours (and
-        // the reviewing admin) recognise the member, but verification is about
-        // the residency document.
-        if (!hasPhoto)
-          Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Icon(Icons.lightbulb_outline, size: 16, color: dark ? Colors.white54 : Colors.black45),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Tip: add a profile photo from your Profile page so neighbours recognise you. It is optional and not required for verification.',
-                  style: TextStyle(fontSize: 11, color: dark ? Colors.white54 : Colors.black45),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          _StatusBanner(status: status),
+          if (status == 'Verified') ...[
+            const SizedBox(height: 16),
+            const Text(
+              'Your residency is verified. You do not need to submit verification documents again.',
+            ),
+          ] else ...[
+            const SizedBox(height: 16),
+            Text(
+              'Submit a document proving your residency in Trinidad, Bohol. An administrator will review it in the Verification queue.',
+              style: TextStyle(color: dark ? Colors.white70 : Colors.black54),
+            ),
+            // Encouraged, never required: a profile photo helps neighbours (and
+            // the reviewing admin) recognise the member, but verification is about
+            // the residency document.
+            if (!hasPhoto)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.lightbulb_outline,
+                      size: 16,
+                      color: dark ? Colors.white54 : Colors.black45,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Tip: add a profile photo from your Profile page so neighbours recognise you. It is optional and not required for verification.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: dark ? Colors.white54 : Colors.black45,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ]),
-          ),
-        if (status != 'Verified') ...[
-          const SizedBox(height: 16),
-          const _VerificationBenefits(),
+            if (status != 'Verified') ...[
+              const SizedBox(height: 16),
+              const _VerificationBenefits(),
+            ],
+            const SizedBox(height: 16),
+            DropdownButtonFormField(
+              initialValue: barangay,
+              decoration: const InputDecoration(labelText: 'Barangay'),
+              items: trinidadBarangays
+                  .map(
+                    (item) => DropdownMenuItem(value: item, child: Text(item)),
+                  )
+                  .toList(),
+              onChanged: (value) => setState(() => barangay = value!),
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: purok,
+              decoration: const InputDecoration(labelText: 'Purok / Sitio'),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField(
+              initialValue: documentType,
+              decoration: const InputDecoration(labelText: 'Document type'),
+              items:
+                  const ['Barangay certificate', 'Valid ID', 'Proof of address']
+                      .map(
+                        (item) =>
+                            DropdownMenuItem(value: item, child: Text(item)),
+                      )
+                      .toList(),
+              onChanged: (value) => setState(() => documentType = value!),
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: chooseDocument,
+              icon: const Icon(Icons.attach_file),
+              label: Text(
+                document == null
+                    ? 'Capture or choose document photo'
+                    : 'Document selected',
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Checkbox(
+                  value: privacyConsent,
+                  onChanged: (value) =>
+                      setState(() => privacyConsent = value ?? false),
+                ),
+                const Text('I agree to the '),
+                TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          const ContentPageScreen(slug: 'privacy-notice'),
+                    ),
+                  ),
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('Privacy Notice'),
+                ),
+              ],
+            ),
+            FilledButton(
+              onPressed: submitting || !privacyConsent ? null : submit,
+              child: Text(submitting ? 'Submitting…' : 'Submit for review'),
+            ),
+          ],
         ],
-        const SizedBox(height: 16),
-        DropdownButtonFormField(initialValue: barangay, decoration: const InputDecoration(labelText: 'Barangay'), items: trinidadBarangays.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(), onChanged: (value) => setState(() => barangay = value!)),
-        const SizedBox(height: 12),
-        TextFormField(controller: purok, decoration: const InputDecoration(labelText: 'Purok / Sitio')),
-        const SizedBox(height: 12),
-        DropdownButtonFormField(initialValue: documentType, decoration: const InputDecoration(labelText: 'Document type'), items: const ['Barangay certificate', 'Valid ID', 'Proof of address'].map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(), onChanged: (value) => setState(() => documentType = value!)),
-        const SizedBox(height: 16),
-        OutlinedButton.icon(onPressed: chooseDocument, icon: const Icon(Icons.attach_file), label: Text(document == null ? 'Capture or choose document photo' : 'Document selected')),
-        const SizedBox(height: 20),
-        FilledButton(onPressed: submitting ? null : submit, child: Text(submitting ? 'Submitting…' : 'Submit for review')),
-      ]),
+      ),
     );
   }
 }
@@ -165,11 +261,18 @@ class _StatusBanner extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: color.withValues(alpha: 0.4)),
       ),
-      child: Row(children: [
-        Icon(icon, color: color, size: 20),
-        const SizedBox(width: 10),
-        Expanded(child: Text('Current status: $status', style: TextStyle(fontWeight: FontWeight.bold, color: color))),
-      ]),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Current status: $status',
+              style: TextStyle(fontWeight: FontWeight.bold, color: color),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -181,10 +284,19 @@ class _VerificationBenefits extends StatelessWidget {
   const _VerificationBenefits();
 
   static const List<(IconData, String)> _benefits = [
-    (Icons.verified_user, 'A "Verified resident" badge on your profile and listings.'),
+    (
+      Icons.verified_user,
+      'A "Verified resident" badge on your profile and listings.',
+    ),
     (Icons.trending_up, 'Your listings are shown first in the browse feed.'),
-    (Icons.all_inclusive, 'Post as many listings as you like — the unverified posting limit is lifted.'),
-    (Icons.campaign_outlined, 'Barangay announcements targeted to verified residents.'),
+    (
+      Icons.all_inclusive,
+      'Post as many listings as you like — the unverified posting limit is lifted.',
+    ),
+    (
+      Icons.campaign_outlined,
+      'Barangay announcements targeted to verified residents.',
+    ),
   ];
 
   @override
@@ -195,26 +307,40 @@ class _VerificationBenefits extends StatelessWidget {
       decoration: BoxDecoration(
         color: dark ? CblrepColors.darkCardGreen : const Color(0xFFF1FAF3),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: CblrepColors.successGreen.withValues(alpha: 0.35)),
+        border: Border.all(
+          color: CblrepColors.successGreen.withValues(alpha: 0.35),
+        ),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Why get verified?', style: TextStyle(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        for (final (icon, text) in _benefits)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Icon(icon, size: 16, color: CblrepColors.successGreen),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  text,
-                  style: TextStyle(fontSize: 12, color: dark ? Colors.white70 : Colors.black54),
-                ),
-              ),
-            ]),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Why get verified?',
+            style: TextStyle(fontWeight: FontWeight.bold),
           ),
-      ]),
+          const SizedBox(height: 8),
+          for (final (icon, text) in _benefits)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(icon, size: 16, color: CblrepColors.successGreen),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      text,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: dark ? Colors.white70 : Colors.black54,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
