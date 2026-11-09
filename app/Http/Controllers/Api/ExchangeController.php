@@ -392,7 +392,9 @@ class ExchangeController extends Controller
      *      and both listings are closed (is_active=false, status=traded).
      *   5. With only one flag set the row stays `accepted` (partially
      *      confirmed) so the app can show "Waiting for other party's
-     *      confirmation".
+     *      confirmation", and the other party is notified once — a nudge to
+     *      confirm their own half, not a second record of the trade.
+     *   6. Re-confirming the same half is idempotent and never re-notifies.
      */
     public function confirmCompletion(Request $request, $id)
     {
@@ -433,6 +435,12 @@ class ExchangeController extends Controller
             // "one flag missing" and skip the promotion to completed.
             $locked = Exchange::whereKey($exchange->id)->lockForUpdate()->firstOrFail();
 
+            // Whether this tap actually moved the row forward, or just repeated
+            // a half that was already on record. A repeat must not re-notify.
+            $alreadyConfirmed = $isProposer
+                ? (bool) $locked->proposer_confirmed
+                : (bool) $locked->owner_confirmed;
+
             if ($isProposer) {
                 $locked->proposer_confirmed = true;
                 $locked->proposer_confirmed_at ??= $now;
@@ -457,6 +465,10 @@ class ExchangeController extends Controller
                 }
 
                 $this->notifyOther($locked, $userId, Exchange::STATUS_COMPLETED);
+            } elseif (! $alreadyConfirmed) {
+                // First half on record: the trade cannot close until the other
+                // party confirms theirs, so tell them it is their turn.
+                $this->notifyConfirmationPending($locked, $userId);
             }
 
             return $locked->fresh(['resource', 'offeredResource', 'receiver', 'provider']);
@@ -687,6 +699,46 @@ class ExchangeController extends Controller
             );
         } catch (\Throwable $e) {
             // A notification failure must not roll back the status change.
+            report($e);
+        }
+    }
+
+    /**
+     * Nudge the other party once the first half of a dual confirmation lands.
+     *
+     * Without this the member who has not yet confirmed only discovers it by
+     * opening the Exchanges tab, so a trade can sit in `accepted` indefinitely
+     * even though the other neighbour has already said it happened. The row is
+     * still `accepted` — this is a prompt, not a second record of the trade —
+     * and the completion notification still arrives when they confirm.
+     */
+    private function notifyConfirmationPending(Exchange $exchange, int $actorId): void
+    {
+        $recipientId = $exchange->provider_id === $actorId
+            ? $exchange->receiver_id
+            : $exchange->provider_id;
+
+        $title = $exchange->isNeed()
+            ? 'Confirm the handover'
+            : 'Confirm the trade';
+
+        $body = $exchange->isNeed()
+            ? '“'.$exchange->requestedLabel().'” — your neighbour confirmed the handover. '
+                .'Confirm your side to close the request.'
+            : $exchange->requestedLabel().' ↔ '.$exchange->offeredLabel()
+                .' — your neighbour confirmed. Confirm your side to complete the trade.';
+
+        try {
+            app(NotificationService::class)->notify(
+                $recipientId,
+                NotificationService::CATEGORY_EXCHANGES,
+                'exchange_update',
+                $title,
+                $body,
+                ['exchange_id' => $exchange->id, 'status' => 'awaiting_confirmation'],
+            );
+        } catch (\Throwable $e) {
+            // A notification failure must not roll back the confirmation.
             report($e);
         }
     }
