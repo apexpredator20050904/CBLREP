@@ -2,8 +2,9 @@
 // CBLRE Admin · Header (Tailwind)
 // ─────────────────────────────────────────────────────────────
 // Top bar shown on every /admin/* page: current section title, admin
-// identity chip, and sign-out. Logout revokes the Sanctum token via the
-// AuthContext, then RequireAdmin bounces the session to /login.
+// identity chip, and a mobile-only sign-out (the sidebar's sign-out is
+// hidden below the md breakpoint). Logout revokes the Sanctum token via
+// the AuthContext, then RequireAdmin bounces the session to /login.
 // ─────────────────────────────────────────────────────────────
 import { useAuth } from "../context/AuthContext";
 
@@ -41,7 +42,7 @@ export default function Header({ title }) {
         <button
           type="button"
           onClick={logout}
-          className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm font-semibold text-emerald-950 hover:bg-emerald-50"
+          className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm font-semibold text-emerald-950 hover:bg-emerald-50 md:hidden"
         >
           Sign out
         </button>
