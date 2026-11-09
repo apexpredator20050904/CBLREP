@@ -930,15 +930,6 @@ class ApiService {
     await _request(_dio.delete('/messages/$messageId'));
   }
 
-  Future<List<dynamic>> messages() async {
-    try {
-      final data = await _request(_dio.get('/messages')) as Map;
-      return List<dynamic>.from(data['messages'] ?? const []);
-    } on ApiException {
-      return const [];
-    }
-  }
-
   Future<Map<String, dynamic>> sendMessage(Map<String, dynamic> payload) async =>
       Map<String, dynamic>.from(await _request(_dio.post('/messages', data: payload)) as Map);
 
