@@ -46,15 +46,36 @@ class LiveHubProvider extends ChangeNotifier {
     }
   }
 
+  /// Total unread direct messages across every conversation.
+  ///
+  /// `/conversations` already returns a per-thread `unread_count`, so the
+  /// bottom-nav badge does not need another endpoint.
+  int get unreadMessages => conversations.fold<int>(
+        0,
+        (sum, conversation) =>
+            sum + (((conversation as Map)['unread_count'] as num?)?.toInt() ?? 0),
+      );
+
+  /// Exchanges waiting on this member: incoming proposals to accept or
+  /// decline, and accepted trades still needing this member's completion
+  /// confirmation. Proposals the member sent are excluded — there is nothing
+  /// to act on there.
+  int get exchangeActions => exchanges.where((exchange) {
+        final row = exchange as Map;
+        return row['can_respond'] == true || row['can_confirm_completion'] == true;
+      }).length;
+
   /// Cheap fingerprint of everything the UI renders from this provider.
   String get _fingerprint => [
         exchanges.length,
         exchanges
             .map((e) => '${(e as Map)['id']}:${(e as Map)['raw_status'] ?? (e as Map)['status']}')
             .join(','),
+        exchangeActions,
         notifications.length,
         unreadCount,
         conversations.length,
+        unreadMessages,
         dashboard?.values.join('|'),
       ].join('§');
 

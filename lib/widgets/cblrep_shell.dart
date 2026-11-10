@@ -82,9 +82,11 @@ class _CblrepShellState extends State<CblrepShell> {
 
   @override
   Widget build(BuildContext context) {
-    // Select only the badge count — a plain watch would rebuild the entire
-    // shell (app bar, navigation bar and the open page) on every 20s poll.
+    // Select only the three badge counts — a plain watch would rebuild the
+    // entire shell (app bar, navigation bar and the open page) on every poll.
     final unread = context.select<LiveHubProvider, int>((hub) => hub.unreadCount);
+    final unreadMessages = context.select<LiveHubProvider, int>((hub) => hub.unreadMessages);
+    final exchangeActions = context.select<LiveHubProvider, int>((hub) => hub.exchangeActions);
     final dark = Theme.of(context).brightness == Brightness.dark;
     final barColor = dark ? CblrepColors.deepForest : Colors.white;
     return Scaffold(
@@ -142,15 +144,43 @@ class _CblrepShellState extends State<CblrepShell> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: index,
         onDestinationSelected: (value) => setState(() => index = value),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
-          NavigationDestination(icon: Icon(Icons.swap_horiz_outlined), selectedIcon: Icon(Icons.swap_horiz), label: 'Exchanges'),
-          NavigationDestination(icon: Icon(Icons.map_outlined), selectedIcon: Icon(Icons.map), label: 'Map'),
-          NavigationDestination(icon: Icon(Icons.chat_bubble_outline), selectedIcon: Icon(Icons.chat_bubble), label: 'Messages'),
-          NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Profile'),
+        destinations: [
+          const NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
+          NavigationDestination(
+            icon: _NavBadge(count: exchangeActions, child: const Icon(Icons.swap_horiz_outlined)),
+            selectedIcon: _NavBadge(count: exchangeActions, child: const Icon(Icons.swap_horiz)),
+            label: 'Exchanges',
+          ),
+          const NavigationDestination(icon: Icon(Icons.map_outlined), selectedIcon: Icon(Icons.map), label: 'Map'),
+          NavigationDestination(
+            icon: _NavBadge(count: unreadMessages, child: const Icon(Icons.chat_bubble_outline)),
+            selectedIcon: _NavBadge(count: unreadMessages, child: const Icon(Icons.chat_bubble)),
+            label: 'Messages',
+          ),
+          const NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Profile'),
         ],
       ),
       body: SafeArea(child: _pages[index]),
+    );
+  }
+}
+
+/// Numeric bubble over a navigation icon. Hidden at zero so tabs with nothing
+/// waiting stay clean; [Badge.count] caps very large values at "999+".
+class _NavBadge extends StatelessWidget {
+  const _NavBadge({required this.count, required this.child});
+
+  final int count;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Badge.count(
+      count: count,
+      isLabelVisible: count > 0,
+      backgroundColor: CblrepColors.actionOrange,
+      textColor: Colors.white,
+      child: child,
     );
   }
 }

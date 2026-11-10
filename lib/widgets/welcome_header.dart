@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/greeting.dart';
 import '../theme/cblrep_theme.dart';
 import 'user_avatar.dart';
 
@@ -32,7 +33,7 @@ class WelcomeHeader extends StatelessWidget {
         const SizedBox(width: 12),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Good day, $name!',
+            Text('${greetingForNow()}, $name!',
                 style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 15)),
             const SizedBox(height: 2),
             Text(subtitle, style: const TextStyle(color: Colors.white70, fontSize: 11)),

@@ -1,38 +1,12 @@
 import 'package:flutter/material.dart';
 import '../config/community.dart';
+import '../core/greeting.dart';
 import '../theme/cblrep_theme.dart';
 import 'user_avatar.dart';
 
-/// The localized greeting for the current time of day.
-///
-/// Cebuano is the everyday language of this part of Bohol, and the app is
-/// used by neighbours, not by an English-only administration — so the home
-/// screen greets a member the way a neighbour would.
-enum _Greeting {
-  morning('Maayong Buntag', 'Good morning'),
-  afternoon('Maayong Hapon', 'Good afternoon'),
-  evening('Maayong Gabi', 'Good evening');
-
-  const _Greeting(this.local, this.english);
-
-  /// The Cebuano greeting, shown in the banner.
-  final String local;
-
-  /// The English gloss, used for the accessibility label.
-  final String english;
-
-  /// The greeting that fits the current clock.
-  static _Greeting forNow([DateTime? at]) {
-    final hour = (at ?? DateTime.now()).hour;
-    if (hour >= 5 && hour < 12) return _Greeting.morning;
-    if (hour >= 12 && hour < 18) return _Greeting.afternoon;
-    return _Greeting.evening;
-  }
-}
-
 /// The warm welcome banner at the top of the home feed.
 ///
-/// Carries the localized greeting, the member's name, the line that explains
+/// Carries the time-of-day greeting, the member's name, the line that explains
 /// what the portal is for, and the quick-filter bar for Trinidad's
 /// barangays — the fastest way for a member to see what their own
 /// neighbourhood is sharing.
@@ -55,7 +29,7 @@ class HeroBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final greeting = _Greeting.forNow();
+    final greeting = greetingForNow();
     final hasPhoto = avatarUrl != null && avatarUrl!.isNotEmpty;
     final firstName = name.trim().split(RegExp(r'\s+')).first;
 
@@ -112,9 +86,9 @@ class HeroBanner extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Semantics(
-                      label: '${greeting.english}, $name',
+                      label: '$greeting, $name',
                       child: Text(
-                        '${greeting.local}, $firstName!',
+                        '$greeting, $firstName!',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(

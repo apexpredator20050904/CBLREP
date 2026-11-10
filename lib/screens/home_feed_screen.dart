@@ -25,7 +25,7 @@ import 'listing_detail_screen.dart';
 ///
 /// The screen is built as one scroll view with three parts:
 ///
-///   1. a warm, localized hero (the greeting and the barangay quick-filter),
+///   1. a warm hero (the greeting and the barangay quick-filter),
 ///   2. a STICKY search-and-filter bar that stays reachable while the
 ///      member scrolls, and
 ///   3. the listings themselves.

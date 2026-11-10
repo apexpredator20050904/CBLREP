@@ -52,7 +52,7 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
     final verb = switch (status) {
       'accepted' => 'Accept',
       'rejected' => 'Decline',
-      _ => 'Cancel',
+      _ => 'Cancel exchange',
     };
     final detail = switch (status) {
       'accepted' => 'The other member will be notified that you accepted "$label".',
@@ -65,6 +65,9 @@ class _ExchangesScreenState extends State<ExchangesScreen> {
       title: '$verb?',
       message: detail,
       confirmLabel: verb,
+      // A cancellation dialog used to show "Cancel" twice — once to dismiss
+      // and once to confirm. "Back" leaves the exchange untouched.
+      cancelLabel: status == 'cancelled' ? 'Back' : 'Cancel',
       danger: status == 'cancelled' || status == 'rejected',
     );
     if (!confirmed || !mounted) return;
