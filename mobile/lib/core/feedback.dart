@@ -102,6 +102,7 @@ class Feedback {
     required String title,
     required String message,
     String confirmLabel = 'Confirm',
+    String cancelLabel = 'Cancel',
     bool danger = false,
   }) async {
     final result = await showDialog<bool>(
@@ -110,7 +111,7 @@ class Feedback {
         title: Text(title),
         content: Text(message),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(c, false), child: Text(cancelLabel)),
           FilledButton(
             style: danger
                 ? FilledButton.styleFrom(backgroundColor: CblrepColors.dangerRed)

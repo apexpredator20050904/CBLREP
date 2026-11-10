@@ -23,7 +23,11 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # 1.5.0 — redesigned home feed (localized hero, sticky search + filters,
 # realistic resource cards, shimmer skeletons) and the community safety
 # reporting system (report a posting or a member).
-version: 1.5.7+12
+#
+# 1.5.8 — waiting-work badges on the bottom navigation (unread messages and
+# exchange actions), one shared time-of-day greeting across the home hero and
+# profile header, and a confirmation dialog whose dismiss action can be named.
+version: 1.5.8+13
 
 environment:
   sdk: ^3.12.2

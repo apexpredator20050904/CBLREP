@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:untitled1/core/api_service.dart';
+import 'package:untitled1/core/greeting.dart';
 import 'package:untitled1/models/models.dart';
 import 'package:untitled1/providers/auth_provider.dart';
 import 'package:untitled1/providers/listings_provider.dart';
@@ -255,8 +256,8 @@ void main() {
 
       await pumpFeed(tester, host(listings: [listing()]));
 
-      expect(find.textContaining('Maayong'), findsOneWidget,
-          reason: 'The hero must greet the member in the local language.');
+      expect(find.text('${greetingForNow()}, Juan!'), findsOneWidget,
+          reason: 'The hero must greet the member in English.');
       expect(find.textContaining('What would you like to barter today?'),
           findsOneWidget);
       expect(find.text('Barangay'), findsOneWidget);
